@@ -220,5 +220,6 @@ tr.revoked td:not(:last-child) { color: var(--ink-2); text-decoration: line-thro
 }
 @media (prefers-reduced-motion: no-preference) {
   .strip { animation: slot .22s ease-out; }
-  @keyframes slot { from { transform: translateX(-10px); opacity: 0; } }
+  /* Transform only, so a strip stays readable even if frames stall. */
+  @keyframes slot { from { transform: translateX(-10px); } }
 }
