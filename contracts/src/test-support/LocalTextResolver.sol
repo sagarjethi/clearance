@@ -30,4 +30,10 @@ contract LocalTextResolver {
     function text(bytes32 node, string calldata key) external view returns (string memory) {
         return records[node][key];
     }
+
+    /// @notice ENSIP-10, the only read path a real ENSv2 resolver has, so local mode reads the same way.
+    function resolve(bytes calldata, bytes calldata data) external view returns (bytes memory) {
+        (bytes32 node, string memory key) = abi.decode(data[4:], (bytes32, string));
+        return abi.encode(records[node][key]);
+    }
 }

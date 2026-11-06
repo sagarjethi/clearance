@@ -5,6 +5,7 @@ import { decodeAbiParameters, decodeFunctionData, encodeFunctionResult, parseAbi
 import { attestDecision, attestNextPending, type Config } from "./attest";
 import { inputsHash } from "../../packages/shared/src/canonical";
 import { poolId } from "../../packages/shared/src/eip712";
+import { resolveAbi } from "../../packages/shared/src/ensv2";
 import { parseLimits, type RawRecords } from "../../packages/shared/src/limits";
 import type { SwapAction } from "../../packages/shared/src/actions";
 
@@ -71,7 +72,7 @@ function proofFor(overrides: Record<string, unknown> = {}) {
 }
 
 const allAbi = parseAbi([
-  "function text(bytes32 node, string key) view returns (string)",
+  "function resolve(bytes name, bytes data) view returns (bytes)",
   "function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)",
   "function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)",
   "struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }",
@@ -90,9 +91,15 @@ function setup(world: World) {
     const data = bytesToHex(req.call.data) as Hex;
     const decoded = decodeFunctionData({ abi: allAbi, data });
     let result: Hex;
-    if (decoded.functionName === "text") {
-      const key = decoded.args[1] as string;
-      result = encodeFunctionResult({ abi: allAbi, functionName: "text", result: (world.records ?? records)[FIELD_BY_KEY[key] as keyof RawRecords] });
+    if (decoded.functionName === "resolve") {
+      const inner = decodeFunctionData({ abi: resolveAbi, data: decoded.args[1] as Hex });
+      const key = inner.args[1] as string;
+      const value = (world.records ?? records)[FIELD_BY_KEY[key] as keyof RawRecords];
+      result = encodeFunctionResult({
+        abi: allAbi,
+        functionName: "resolve",
+        result: encodeFunctionResult({ abi: resolveAbi, functionName: "text", result: value }),
+      });
     } else if (decoded.functionName === "hasQuorum") {
       result = encodeFunctionResult({ abi: allAbi, functionName: "hasQuorum", result: world.quorum ?? true });
     } else if (decoded.functionName === "getSlot0") {
@@ -101,7 +108,7 @@ function setup(world: World) {
       if (world.quoteFails) throw new Error("quote reverted");
       result = encodeFunctionResult({ abi: allAbi, functionName: "quoteExactInputSingle", result: [world.quoteOut ?? 995_000n, 1n] });
     }
-    return { data: toBytes(result) };
+    return { data: toBytes(result) } as any;
   };
   evm.writeReport = (req: any) => {
     receiver = bytesToHex(req.receiver) as Hex;

@@ -45,6 +45,10 @@ export type PaymentFacts = {
 
 export type RuleResult = Pick<Evaluation, "verdict" | "maxAmount" | "reasons">;
 
+function usd(value: number): string {
+  return `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
+
 function blocked(reasons: Reason[]): RuleResult {
   return { verdict: "BLOCK", maxAmount: "0", reasons };
 }
@@ -119,7 +123,7 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
     reasons.push({
       code: "above_hard_cap",
       severity: "block",
-      detail: `$${sizeUsd.toFixed(2)} is above the owner's hard cap of $${limits.humanCapUsd}`,
+      detail: `${usd(sizeUsd)} is above the owner's hard cap of ${usd(limits.humanCapUsd)}`,
       source: "ens",
     });
   }
@@ -156,8 +160,8 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
         severity: "human",
         detail:
           f.humanDetail ??
-          `$${reducedUsd.toFixed(2)} is above the owner's $${limits.maxSizeUsd} limit, so a fresh human approval is required`,
-        source: "ens",
+          `${usd(reducedUsd)} is above the owner's ${usd(limits.maxSizeUsd)} limit, so a fresh human approval is required`,
+        source: f.humanDetail ? "world" : "ens",
       });
       return { verdict: "HUMAN_REQUIRED", maxAmount: "0", reasons };
     }
@@ -198,7 +202,7 @@ export function evaluatePayment(f: PaymentFacts, value: bigint): RuleResult {
     reasons.push({
       code: "payment_above_limit",
       severity: "block",
-      detail: `$${f.valueUsd.toFixed(2)} is above the owner's $${limits.maxPaymentUsd} payment limit`,
+      detail: `${usd(f.valueUsd)} is above the owner's ${usd(limits.maxPaymentUsd)} payment limit`,
       source: "ens",
     });
   }

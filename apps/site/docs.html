@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clearance docs</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2316324f'/><path d='M8 17l5 5 11-12' fill='none' stroke='%23fff' stroke-width='3.4'/></svg>" />
+</head>
+<body class="docs-page">
+  <header class="top">
+    <a class="mark" href="/"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6"/><path d="M8 17l5 5 11-12"/></svg>Clearance</a>
+    <nav aria-label="Main"><a href="/">Home</a><a class="button small" data-dashboard href="#">Open dashboard</a></nav>
+  </header>
+  <div class="docs">
+    <nav class="toc" aria-label="On this page">
+      <a href="#quickstart">Quickstart</a><a href="#swap">Clear a swap</a><a href="#verdicts">Verdicts</a><a href="#human">Owner approval</a><a href="#attest">Independent check</a><a href="#payment">Clear a payment</a><a href="#public">Public endpoints</a><a href="#limits">Owner limits</a><a href="#errors">Errors</a><a href="#contracts">Contracts</a>
+    </nav>
+    <article class="prose">
+      <h1>Docs</h1>
+      <p>Clearance gives an agent's trades and payments a check it can't skip. You call the API before acting, and the chain refuses anything that wasn't cleared.</p>
+
+      <h2 id="quickstart">Quickstart</h2>
+      <p>Run the whole system on a throwaway local chain. It needs Foundry, Node 22 or newer and pnpm. It uses no real funds and no keys.</p>
+<pre><code>git clone --recursive &lt;repo&gt; clearance
+cd clearance
+pnpm install
+pnpm start</code></pre>
+      <p>This starts the website, the dashboard, three verifiers and the API. In another terminal, run every attack:</p>
+<pre><code>pnpm demo</code></pre>
+
+      <h2 id="swap">Clear a swap</h2>
+      <p><code>POST /v1/clear/swap</code>. Authenticate with <code>Authorization: Bearer clr_…</code>, or send no key and pay with x402. The server answers <code>402</code> with payment terms, and an x402 client pays and retries.</p>
+<pre><code>{
+  "action": {
+    "kind": "swap",
+    "agentName": "alice.agents.clearance.eth",
+    "account": "0xYourClearanceAccount",
+    "pool": {
+      "currency0": "0x…", "currency1": "0x…",
+      "fee": 3000, "tickSpacing": 60, "hooks": "0xClearanceHook"
+    },
+    "zeroForOne": true,
+    "amountIn": "100000000",
+    "reason": "Optional. Treated as untrusted and never read by rules."
+  }
+}</code></pre>
+      <p>When cleared, the response carries <code>hookData</code>. Pass it to your account's <code>swapCleared</code>:</p>
+<pre><code>account.swapCleared(pool, zeroForOne, amountIn, minOut, hookData)</code></pre>
+      <p>A clearance lasts 90 seconds, works once, and only for the account it names.</p>
+      <p>Exact-output swaps are always refused, because a hook can't bound their input before the swap runs.</p>
+
+      <h2 id="verdicts">Verdicts</h2>
+      <table>
+        <thead><tr><th>Verdict</th><th>Meaning</th><th>What to do</th></tr></thead>
+        <tbody>
+          <tr><td><code>ALLOW</code></td><td>Enough verifiers signed the full amount.</td><td>Send the swap with <code>hookData</code>.</td></tr>
+          <tr><td><code>REDUCE</code></td><td>They signed a smaller amount, in <code>clearance.maxAmountIn</code>.</td><td>Send that amount or less.</td></tr>
+          <tr><td><code>HUMAN_REQUIRED</code></td><td>It's over the owner's limit.</td><td>Send the owner to <code>checkpoint.url</code>.</td></tr>
+          <tr><td><code>BLOCK</code></td><td>There are no signatures. Each verifier's reasons are in <code>evaluations</code>.</td><td>Don't retry. The chain will refuse it.</td></tr>
+        </tbody>
+      </table>
+      <p>Missing or stale data always gives <code>BLOCK</code>, never a pass.</p>
+
+      <h2 id="human">Owner approval</h2>
+      <ol>
+        <li>Send the owner to <code>checkpoint.url</code>, which starts a fresh World ID login.</li>
+        <li>Check progress at <code>GET /v1/human/:id</code>. It ends as <code>approved</code>, <code>denied</code> or <code>expired</code>.</li>
+        <li>Call <code>/v1/clear/swap</code> again with the same action, plus <code>"checkpointId"</code>.</li>
+      </ol>
+      <p>Each verifier checks the approval's token itself. It only counts if it's from the owner, fresh, and for this exact action. It clears one trade.</p>
+
+      <h2 id="attest">Independent check</h2>
+      <p>When a response has <code>"attestationRequired": true</code>, the hook also needs a finding on the ledger. Ask for it, then send the swap:</p>
+<pre><code>POST /v1/decisions/:id/attest</code></pre>
+      <p>A Chainlink CRE workflow re-reads the owner's limits, confirms the quorum against the contract and re-quotes the market. It writes either an attestation or a refusal to <code>ClearanceLedger</code>. The first report stands. A scheduled run also picks up anything waiting at <code>GET /v1/attestations/pending</code>.</p>
+
+      <h2 id="payment">Clear a payment</h2>
+      <p>The account's <code>isValidSignature</code> only accepts the agent key's signature plus verifier signatures over the exact EIP-3009 payment. To pay, your x402 signer calls <code>POST /v1/clear/payment</code> with the authorization, then appends the returned signatures to the agent's own. See <code>apps/agent/src/agent.ts</code>.</p>
+
+      <h2 id="public">Public endpoints</h2>
+      <table>
+        <thead><tr><th>Endpoint</th><th>Returns</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET /v1/proofs/:id</code></td><td>A decision, its signatures, each verifier's reasons and evidence hash, and any attestation.</td></tr>
+          <tr><td><code>GET /v1/tokens/:address/check</code></td><td>Admin functions found in a token's bytecode, following proxies.</td></tr>
+          <tr><td><code>GET /v1/track-record</code></td><td>Verdict counts and how often each verifier disagreed.</td></tr>
+          <tr><td><code>GET /v1/attestations/pending</code></td><td>Clearances still waiting for an independent check.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="limits">Owner limits</h2>
+      <p>Text records on the agent's ENS name. A missing or invalid record blocks every action.</p>
+      <table>
+        <thead><tr><th>Record</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>clearance.account</code></td><td>The one wallet this name may act for.</td></tr>
+          <tr><td><code>clearance.maxSizeUsd</code></td><td>Above this, the owner must approve.</td></tr>
+          <tr><td><code>clearance.humanCapUsd</code></td><td>A hard cap, even with approval.</td></tr>
+          <tr><td><code>clearance.maxImpactBps</code></td><td>Largest price impact. Bigger trades are reduced.</td></tr>
+          <tr><td><code>clearance.requiredVerifiers</code></td><td>Signatures needed. It can raise the contract's floor, not lower it.</td></tr>
+          <tr><td><code>clearance.allowedTokens</code></td><td>Comma-separated token addresses.</td></tr>
+          <tr><td><code>clearance.maxPaymentUsd</code></td><td>Largest single x402 payment.</td></tr>
+          <tr><td><code>clearance.allowedPayees</code></td><td>Comma-separated payee addresses.</td></tr>
+          <tr><td><code>clearance.ownerSub</code></td><td>The owner's World ID subject, so only they can approve.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="errors">Errors</h2>
+      <table>
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>400</code></td><td>The request body is invalid. <code>issues</code> says where.</td></tr>
+          <tr><td><code>401</code></td><td>The API key is unknown or revoked.</td></tr>
+          <tr><td><code>402</code></td><td>Payment is required. x402 clients handle this.</td></tr>
+          <tr><td><code>404</code></td><td>This deployment doesn't know that agent.</td></tr>
+          <tr><td><code>429</code></td><td>The key's monthly checks are used up, or you sent too many requests.</td></tr>
+        </tbody>
+      </table>
+      <p>A refusal on the chain has a named reason, wrapped by the PoolManager: <code>NoClearance</code>, <code>RouterNotAllowed</code>, <code>WrongAgent</code>, <code>WrongPool</code>, <code>WrongDirection</code>, <code>WrongChain</code>, <code>ClearanceExpired</code>, <code>ExactOutputNotClearable</code>, <code>AmountAboveClearance</code>, <code>NonceUsed</code>, <code>NoQuorum</code> or <code>NotAttested</code>.</p>
+
+      <h2 id="contracts">Contracts</h2>
+      <table>
+        <thead><tr><th>Contract</th><th>Job</th></tr></thead>
+        <tbody>
+          <tr><td><code>ClearanceHook</code></td><td>The v4 hook that checks every swap in its pools.</td></tr>
+          <tr><td><code>ClearanceAccount</code></td><td>The agent's wallet, and the real enforcer.</td></tr>
+          <tr><td><code>VerifierSet</code></td><td>Current verifiers and the quorum.</td></tr>
+          <tr><td><code>ClearanceLedger</code></td><td>Findings from the CRE workflow.</td></tr>
+          <tr><td><code>ClearanceRouter</code></td><td>A small exact-input router that reports its real caller.</td></tr>
+        </tbody>
+      </table>
+    </article>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

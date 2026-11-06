@@ -1,4 +1,4 @@
-import { encodeAbiParameters, type Address, type Hex } from "viem";
+import { encodeAbiParameters, isAddressEqual, type Address, type Hex } from "viem";
 import type { SwapAction } from "./actions";
 import { inputsHash } from "./canonical";
 import { poolId } from "./eip712";
@@ -62,8 +62,8 @@ export type AttestationResult = { status: typeof ATTESTED | typeof REFUSED; prob
 export function evaluateAttestation(input: AttestationInput): AttestationResult {
   const { action, clearance, limits } = input;
   const problems: string[] = [];
-  if (clearance.agent !== action.account) problems.push("Clearance agent isn't the action's account");
-  if (limits.account !== action.account) problems.push("ENS record binds this name to another account");
+  if (!isAddressEqual(clearance.agent, action.account)) problems.push("Clearance agent isn't the action's account");
+  if (!isAddressEqual(limits.account, action.account)) problems.push("ENS record binds this name to another account");
   if (clearance.poolId !== poolId(action.pool)) problems.push("Clearance pool isn't the action's pool");
   if (clearance.zeroForOne !== action.zeroForOne) problems.push("Clearance direction isn't the action's direction");
   if (clearance.chainId !== input.chainId) problems.push("Clearance is for another chain");

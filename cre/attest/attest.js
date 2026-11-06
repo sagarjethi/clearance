@@ -5259,6 +5259,802 @@ var init_decodeFunctionResult = __esm(() => {
   init_decodeAbiParameters();
   init_getAbiItem();
 });
+var version3 = "1.2.3";
+var BaseError3;
+var init_errors2 = __esm(() => {
+  BaseError3 = class BaseError32 extends Error {
+    constructor(shortMessage, args = {}) {
+      const details = args.cause instanceof BaseError32 ? args.cause.details : args.cause?.message ? args.cause.message : args.details;
+      const docsPath3 = args.cause instanceof BaseError32 ? args.cause.docsPath || args.docsPath : args.docsPath;
+      const message = [
+        shortMessage || "An error occurred.",
+        "",
+        ...args.metaMessages ? [...args.metaMessages, ""] : [],
+        ...docsPath3 ? [`Docs: https://abitype.dev${docsPath3}`] : [],
+        ...details ? [`Details: ${details}`] : [],
+        `Version: abitype@${version3}`
+      ].join(`
+`);
+      super(message);
+      Object.defineProperty(this, "details", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      Object.defineProperty(this, "docsPath", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      Object.defineProperty(this, "metaMessages", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      Object.defineProperty(this, "shortMessage", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "AbiTypeError"
+      });
+      if (args.cause)
+        this.cause = args.cause;
+      this.details = details;
+      this.docsPath = docsPath3;
+      this.metaMessages = args.metaMessages;
+      this.shortMessage = shortMessage;
+    }
+  };
+});
+function execTyped2(regex, string) {
+  const match = regex.exec(string);
+  return match?.groups;
+}
+var bytesRegex2;
+var integerRegex3;
+var isTupleRegex2;
+var init_regex3 = __esm(() => {
+  bytesRegex2 = /^bytes([1-9]|1[0-9]|2[0-9]|3[0-2])?$/;
+  integerRegex3 = /^u?int(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?$/;
+  isTupleRegex2 = /^\(.+?\).*?$/;
+});
+function formatAbiParameter2(abiParameter) {
+  let type = abiParameter.type;
+  if (tupleRegex2.test(abiParameter.type) && "components" in abiParameter) {
+    type = "(";
+    const length = abiParameter.components.length;
+    for (let i2 = 0;i2 < length; i2++) {
+      const component = abiParameter.components[i2];
+      type += formatAbiParameter2(component);
+      if (i2 < length - 1)
+        type += ", ";
+    }
+    const result = execTyped2(tupleRegex2, abiParameter.type);
+    type += `)${result?.array || ""}`;
+    return formatAbiParameter2({
+      ...abiParameter,
+      type
+    });
+  }
+  if ("indexed" in abiParameter && abiParameter.indexed)
+    type = `${type} indexed`;
+  if (abiParameter.name)
+    return `${type} ${abiParameter.name}`;
+  return type;
+}
+var tupleRegex2;
+var init_formatAbiParameter2 = __esm(() => {
+  init_regex3();
+  tupleRegex2 = /^tuple(?<array>(\[(\d*)\])*)$/;
+});
+function formatAbiParameters2(abiParameters) {
+  let params = "";
+  const length = abiParameters.length;
+  for (let i2 = 0;i2 < length; i2++) {
+    const abiParameter = abiParameters[i2];
+    params += formatAbiParameter2(abiParameter);
+    if (i2 !== length - 1)
+      params += ", ";
+  }
+  return params;
+}
+var init_formatAbiParameters2 = __esm(() => {
+  init_formatAbiParameter2();
+});
+function formatAbiItem3(abiItem) {
+  if (abiItem.type === "function")
+    return `function ${abiItem.name}(${formatAbiParameters2(abiItem.inputs)})${abiItem.stateMutability && abiItem.stateMutability !== "nonpayable" ? ` ${abiItem.stateMutability}` : ""}${abiItem.outputs?.length ? ` returns (${formatAbiParameters2(abiItem.outputs)})` : ""}`;
+  if (abiItem.type === "event")
+    return `event ${abiItem.name}(${formatAbiParameters2(abiItem.inputs)})`;
+  if (abiItem.type === "error")
+    return `error ${abiItem.name}(${formatAbiParameters2(abiItem.inputs)})`;
+  if (abiItem.type === "constructor")
+    return `constructor(${formatAbiParameters2(abiItem.inputs)})${abiItem.stateMutability === "payable" ? " payable" : ""}`;
+  if (abiItem.type === "fallback")
+    return `fallback() external${abiItem.stateMutability === "payable" ? " payable" : ""}`;
+  return "receive() external payable";
+}
+var init_formatAbiItem3 = __esm(() => {
+  init_formatAbiParameters2();
+});
+function isErrorSignature2(signature) {
+  return errorSignatureRegex2.test(signature);
+}
+function execErrorSignature2(signature) {
+  return execTyped2(errorSignatureRegex2, signature);
+}
+function isEventSignature2(signature) {
+  return eventSignatureRegex2.test(signature);
+}
+function execEventSignature2(signature) {
+  return execTyped2(eventSignatureRegex2, signature);
+}
+function isFunctionSignature2(signature) {
+  return functionSignatureRegex2.test(signature);
+}
+function execFunctionSignature2(signature) {
+  return execTyped2(functionSignatureRegex2, signature);
+}
+function isStructSignature2(signature) {
+  return structSignatureRegex2.test(signature);
+}
+function execStructSignature2(signature) {
+  return execTyped2(structSignatureRegex2, signature);
+}
+function isConstructorSignature2(signature) {
+  return constructorSignatureRegex2.test(signature);
+}
+function execConstructorSignature2(signature) {
+  return execTyped2(constructorSignatureRegex2, signature);
+}
+function isFallbackSignature2(signature) {
+  return fallbackSignatureRegex2.test(signature);
+}
+function execFallbackSignature2(signature) {
+  return execTyped2(fallbackSignatureRegex2, signature);
+}
+function isReceiveSignature2(signature) {
+  return receiveSignatureRegex2.test(signature);
+}
+var errorSignatureRegex2;
+var eventSignatureRegex2;
+var functionSignatureRegex2;
+var structSignatureRegex2;
+var constructorSignatureRegex2;
+var fallbackSignatureRegex2;
+var receiveSignatureRegex2;
+var modifiers2;
+var eventModifiers2;
+var functionModifiers2;
+var init_signatures2 = __esm(() => {
+  init_regex3();
+  errorSignatureRegex2 = /^error (?<name>[a-zA-Z$_][a-zA-Z0-9$_]*)\((?<parameters>.*?)\)$/;
+  eventSignatureRegex2 = /^event (?<name>[a-zA-Z$_][a-zA-Z0-9$_]*)\((?<parameters>.*?)\)$/;
+  functionSignatureRegex2 = /^function (?<name>[a-zA-Z$_][a-zA-Z0-9$_]*)\((?<parameters>.*?)\)(?: (?<scope>external|public{1}))?(?: (?<stateMutability>pure|view|nonpayable|payable{1}))?(?: returns\s?\((?<returns>.*?)\))?$/;
+  structSignatureRegex2 = /^struct (?<name>[a-zA-Z$_][a-zA-Z0-9$_]*) \{(?<properties>.*?)\}$/;
+  constructorSignatureRegex2 = /^constructor\((?<parameters>.*?)\)(?:\s(?<stateMutability>payable{1}))?$/;
+  fallbackSignatureRegex2 = /^fallback\(\) external(?:\s(?<stateMutability>payable{1}))?$/;
+  receiveSignatureRegex2 = /^receive\(\) external payable$/;
+  modifiers2 = new Set([
+    "memory",
+    "indexed",
+    "storage",
+    "calldata"
+  ]);
+  eventModifiers2 = new Set(["indexed"]);
+  functionModifiers2 = new Set([
+    "calldata",
+    "memory",
+    "storage"
+  ]);
+});
+var UnknownTypeError2;
+var UnknownSolidityTypeError2;
+var init_abiItem2 = __esm(() => {
+  init_errors2();
+  UnknownTypeError2 = class UnknownTypeError22 extends BaseError3 {
+    constructor({ type }) {
+      super("Unknown type.", {
+        metaMessages: [
+          `Type "${type}" is not a valid ABI type. Perhaps you forgot to include a struct signature?`
+        ]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "UnknownTypeError"
+      });
+    }
+  };
+  UnknownSolidityTypeError2 = class UnknownSolidityTypeError22 extends BaseError3 {
+    constructor({ type }) {
+      super("Unknown type.", {
+        metaMessages: [`Type "${type}" is not a valid ABI type.`]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "UnknownSolidityTypeError"
+      });
+    }
+  };
+});
+var InvalidParameterError2;
+var SolidityProtectedKeywordError2;
+var InvalidModifierError2;
+var InvalidFunctionModifierError2;
+var InvalidAbiTypeParameterError2;
+var init_abiParameter2 = __esm(() => {
+  init_errors2();
+  InvalidParameterError2 = class InvalidParameterError22 extends BaseError3 {
+    constructor({ param }) {
+      super("Invalid ABI parameter.", {
+        details: param
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidParameterError"
+      });
+    }
+  };
+  SolidityProtectedKeywordError2 = class SolidityProtectedKeywordError22 extends BaseError3 {
+    constructor({ param, name }) {
+      super("Invalid ABI parameter.", {
+        details: param,
+        metaMessages: [
+          `"${name}" is a protected Solidity keyword. More info: https://docs.soliditylang.org/en/latest/cheatsheet.html`
+        ]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "SolidityProtectedKeywordError"
+      });
+    }
+  };
+  InvalidModifierError2 = class InvalidModifierError22 extends BaseError3 {
+    constructor({ param, type, modifier }) {
+      super("Invalid ABI parameter.", {
+        details: param,
+        metaMessages: [
+          `Modifier "${modifier}" not allowed${type ? ` in "${type}" type` : ""}.`
+        ]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidModifierError"
+      });
+    }
+  };
+  InvalidFunctionModifierError2 = class InvalidFunctionModifierError22 extends BaseError3 {
+    constructor({ param, type, modifier }) {
+      super("Invalid ABI parameter.", {
+        details: param,
+        metaMessages: [
+          `Modifier "${modifier}" not allowed${type ? ` in "${type}" type` : ""}.`,
+          `Data location can only be specified for array, struct, or mapping types, but "${modifier}" was given.`
+        ]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidFunctionModifierError"
+      });
+    }
+  };
+  InvalidAbiTypeParameterError2 = class InvalidAbiTypeParameterError22 extends BaseError3 {
+    constructor({ abiParameter }) {
+      super("Invalid ABI parameter.", {
+        details: JSON.stringify(abiParameter, null, 2),
+        metaMessages: ["ABI parameter type is invalid."]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidAbiTypeParameterError"
+      });
+    }
+  };
+});
+var InvalidSignatureError2;
+var UnknownSignatureError2;
+var InvalidStructSignatureError2;
+var init_signature2 = __esm(() => {
+  init_errors2();
+  InvalidSignatureError2 = class InvalidSignatureError22 extends BaseError3 {
+    constructor({ signature, type }) {
+      super(`Invalid ${type} signature.`, {
+        details: signature
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidSignatureError"
+      });
+    }
+  };
+  UnknownSignatureError2 = class UnknownSignatureError22 extends BaseError3 {
+    constructor({ signature }) {
+      super("Unknown signature.", {
+        details: signature
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "UnknownSignatureError"
+      });
+    }
+  };
+  InvalidStructSignatureError2 = class InvalidStructSignatureError22 extends BaseError3 {
+    constructor({ signature }) {
+      super("Invalid struct signature.", {
+        details: signature,
+        metaMessages: ["No properties exist."]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidStructSignatureError"
+      });
+    }
+  };
+});
+var CircularReferenceError2;
+var init_struct2 = __esm(() => {
+  init_errors2();
+  CircularReferenceError2 = class CircularReferenceError22 extends BaseError3 {
+    constructor({ type }) {
+      super("Circular reference detected.", {
+        metaMessages: [`Struct "${type}" is a circular reference.`]
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "CircularReferenceError"
+      });
+    }
+  };
+});
+var InvalidParenthesisError2;
+var init_splitParameters2 = __esm(() => {
+  init_errors2();
+  InvalidParenthesisError2 = class InvalidParenthesisError22 extends BaseError3 {
+    constructor({ current, depth }) {
+      super("Unbalanced parentheses.", {
+        metaMessages: [
+          `"${current.trim()}" has too many ${depth > 0 ? "opening" : "closing"} parentheses.`
+        ],
+        details: `Depth "${depth}"`
+      });
+      Object.defineProperty(this, "name", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: "InvalidParenthesisError"
+      });
+    }
+  };
+});
+function getParameterCacheKey2(param, type, structs) {
+  let structKey = "";
+  if (structs)
+    for (const struct of Object.entries(structs)) {
+      if (!struct)
+        continue;
+      let propertyKey = "";
+      for (const property of struct[1]) {
+        propertyKey += `[${property.type}${property.name ? `:${property.name}` : ""}]`;
+      }
+      structKey += `(${struct[0]}{${propertyKey}})`;
+    }
+  if (type)
+    return `${type}:${param}${structKey}`;
+  return `${param}${structKey}`;
+}
+var parameterCache2;
+var init_cache2 = __esm(() => {
+  parameterCache2 = new Map([
+    ["address", { type: "address" }],
+    ["bool", { type: "bool" }],
+    ["bytes", { type: "bytes" }],
+    ["bytes32", { type: "bytes32" }],
+    ["int", { type: "int256" }],
+    ["int256", { type: "int256" }],
+    ["string", { type: "string" }],
+    ["uint", { type: "uint256" }],
+    ["uint8", { type: "uint8" }],
+    ["uint16", { type: "uint16" }],
+    ["uint24", { type: "uint24" }],
+    ["uint32", { type: "uint32" }],
+    ["uint64", { type: "uint64" }],
+    ["uint96", { type: "uint96" }],
+    ["uint112", { type: "uint112" }],
+    ["uint160", { type: "uint160" }],
+    ["uint192", { type: "uint192" }],
+    ["uint256", { type: "uint256" }],
+    ["address owner", { type: "address", name: "owner" }],
+    ["address to", { type: "address", name: "to" }],
+    ["bool approved", { type: "bool", name: "approved" }],
+    ["bytes _data", { type: "bytes", name: "_data" }],
+    ["bytes data", { type: "bytes", name: "data" }],
+    ["bytes signature", { type: "bytes", name: "signature" }],
+    ["bytes32 hash", { type: "bytes32", name: "hash" }],
+    ["bytes32 r", { type: "bytes32", name: "r" }],
+    ["bytes32 root", { type: "bytes32", name: "root" }],
+    ["bytes32 s", { type: "bytes32", name: "s" }],
+    ["string name", { type: "string", name: "name" }],
+    ["string symbol", { type: "string", name: "symbol" }],
+    ["string tokenURI", { type: "string", name: "tokenURI" }],
+    ["uint tokenId", { type: "uint256", name: "tokenId" }],
+    ["uint8 v", { type: "uint8", name: "v" }],
+    ["uint256 balance", { type: "uint256", name: "balance" }],
+    ["uint256 tokenId", { type: "uint256", name: "tokenId" }],
+    ["uint256 value", { type: "uint256", name: "value" }],
+    [
+      "event:address indexed from",
+      { type: "address", name: "from", indexed: true }
+    ],
+    ["event:address indexed to", { type: "address", name: "to", indexed: true }],
+    [
+      "event:uint indexed tokenId",
+      { type: "uint256", name: "tokenId", indexed: true }
+    ],
+    [
+      "event:uint256 indexed tokenId",
+      { type: "uint256", name: "tokenId", indexed: true }
+    ]
+  ]);
+});
+function parseSignature2(signature, structs = {}) {
+  if (isFunctionSignature2(signature))
+    return parseFunctionSignature2(signature, structs);
+  if (isEventSignature2(signature))
+    return parseEventSignature2(signature, structs);
+  if (isErrorSignature2(signature))
+    return parseErrorSignature2(signature, structs);
+  if (isConstructorSignature2(signature))
+    return parseConstructorSignature2(signature, structs);
+  if (isFallbackSignature2(signature))
+    return parseFallbackSignature2(signature);
+  if (isReceiveSignature2(signature))
+    return {
+      type: "receive",
+      stateMutability: "payable"
+    };
+  throw new UnknownSignatureError2({ signature });
+}
+function parseFunctionSignature2(signature, structs = {}) {
+  const match = execFunctionSignature2(signature);
+  if (!match)
+    throw new InvalidSignatureError2({ signature, type: "function" });
+  const inputParams = splitParameters2(match.parameters);
+  const inputs = [];
+  const inputLength = inputParams.length;
+  for (let i2 = 0;i2 < inputLength; i2++) {
+    inputs.push(parseAbiParameter3(inputParams[i2], {
+      modifiers: functionModifiers2,
+      structs,
+      type: "function"
+    }));
+  }
+  const outputs = [];
+  if (match.returns) {
+    const outputParams = splitParameters2(match.returns);
+    const outputLength = outputParams.length;
+    for (let i2 = 0;i2 < outputLength; i2++) {
+      outputs.push(parseAbiParameter3(outputParams[i2], {
+        modifiers: functionModifiers2,
+        structs,
+        type: "function"
+      }));
+    }
+  }
+  return {
+    name: match.name,
+    type: "function",
+    stateMutability: match.stateMutability ?? "nonpayable",
+    inputs,
+    outputs
+  };
+}
+function parseEventSignature2(signature, structs = {}) {
+  const match = execEventSignature2(signature);
+  if (!match)
+    throw new InvalidSignatureError2({ signature, type: "event" });
+  const params = splitParameters2(match.parameters);
+  const abiParameters = [];
+  const length = params.length;
+  for (let i2 = 0;i2 < length; i2++)
+    abiParameters.push(parseAbiParameter3(params[i2], {
+      modifiers: eventModifiers2,
+      structs,
+      type: "event"
+    }));
+  return { name: match.name, type: "event", inputs: abiParameters };
+}
+function parseErrorSignature2(signature, structs = {}) {
+  const match = execErrorSignature2(signature);
+  if (!match)
+    throw new InvalidSignatureError2({ signature, type: "error" });
+  const params = splitParameters2(match.parameters);
+  const abiParameters = [];
+  const length = params.length;
+  for (let i2 = 0;i2 < length; i2++)
+    abiParameters.push(parseAbiParameter3(params[i2], { structs, type: "error" }));
+  return { name: match.name, type: "error", inputs: abiParameters };
+}
+function parseConstructorSignature2(signature, structs = {}) {
+  const match = execConstructorSignature2(signature);
+  if (!match)
+    throw new InvalidSignatureError2({ signature, type: "constructor" });
+  const params = splitParameters2(match.parameters);
+  const abiParameters = [];
+  const length = params.length;
+  for (let i2 = 0;i2 < length; i2++)
+    abiParameters.push(parseAbiParameter3(params[i2], { structs, type: "constructor" }));
+  return {
+    type: "constructor",
+    stateMutability: match.stateMutability ?? "nonpayable",
+    inputs: abiParameters
+  };
+}
+function parseFallbackSignature2(signature) {
+  const match = execFallbackSignature2(signature);
+  if (!match)
+    throw new InvalidSignatureError2({ signature, type: "fallback" });
+  return {
+    type: "fallback",
+    stateMutability: match.stateMutability ?? "nonpayable"
+  };
+}
+function parseAbiParameter3(param, options) {
+  const parameterCacheKey = getParameterCacheKey2(param, options?.type, options?.structs);
+  if (parameterCache2.has(parameterCacheKey))
+    return parameterCache2.get(parameterCacheKey);
+  const isTuple = isTupleRegex2.test(param);
+  const match = execTyped2(isTuple ? abiParameterWithTupleRegex2 : abiParameterWithoutTupleRegex2, param);
+  if (!match)
+    throw new InvalidParameterError2({ param });
+  if (match.name && isSolidityKeyword2(match.name))
+    throw new SolidityProtectedKeywordError2({ param, name: match.name });
+  const name = match.name ? { name: match.name } : {};
+  const indexed = match.modifier === "indexed" ? { indexed: true } : {};
+  const structs = options?.structs ?? {};
+  let type;
+  let components = {};
+  if (isTuple) {
+    type = "tuple";
+    const params = splitParameters2(match.type);
+    const components_ = [];
+    const length = params.length;
+    for (let i2 = 0;i2 < length; i2++) {
+      components_.push(parseAbiParameter3(params[i2], { structs }));
+    }
+    components = { components: components_ };
+  } else if (match.type in structs) {
+    type = "tuple";
+    components = { components: structs[match.type] };
+  } else if (dynamicIntegerRegex2.test(match.type)) {
+    type = `${match.type}256`;
+  } else if (match.type === "address payable") {
+    type = "address";
+  } else {
+    type = match.type;
+    if (!(options?.type === "struct") && !isSolidityType2(type))
+      throw new UnknownSolidityTypeError2({ type });
+  }
+  if (match.modifier) {
+    if (!options?.modifiers?.has?.(match.modifier))
+      throw new InvalidModifierError2({
+        param,
+        type: options?.type,
+        modifier: match.modifier
+      });
+    if (functionModifiers2.has(match.modifier) && !isValidDataLocation2(type, !!match.array))
+      throw new InvalidFunctionModifierError2({
+        param,
+        type: options?.type,
+        modifier: match.modifier
+      });
+  }
+  const abiParameter = {
+    type: `${type}${match.array ?? ""}`,
+    ...name,
+    ...indexed,
+    ...components
+  };
+  parameterCache2.set(parameterCacheKey, abiParameter);
+  return abiParameter;
+}
+function splitParameters2(params, result = [], current = "", depth = 0) {
+  const length = params.trim().length;
+  for (let i2 = 0;i2 < length; i2++) {
+    const char = params[i2];
+    const tail = params.slice(i2 + 1);
+    switch (char) {
+      case ",":
+        return depth === 0 ? splitParameters2(tail, [...result, current.trim()]) : splitParameters2(tail, result, `${current}${char}`, depth);
+      case "(":
+        return splitParameters2(tail, result, `${current}${char}`, depth + 1);
+      case ")":
+        return splitParameters2(tail, result, `${current}${char}`, depth - 1);
+      default:
+        return splitParameters2(tail, result, `${current}${char}`, depth);
+    }
+  }
+  if (current === "")
+    return result;
+  if (depth !== 0)
+    throw new InvalidParenthesisError2({ current, depth });
+  result.push(current.trim());
+  return result;
+}
+function isSolidityType2(type) {
+  return type === "address" || type === "bool" || type === "function" || type === "string" || bytesRegex2.test(type) || integerRegex3.test(type);
+}
+function isSolidityKeyword2(name) {
+  return name === "address" || name === "bool" || name === "function" || name === "string" || name === "tuple" || bytesRegex2.test(name) || integerRegex3.test(name) || protectedKeywordsRegex2.test(name);
+}
+function isValidDataLocation2(type, isArray) {
+  return isArray || type === "bytes" || type === "string" || type === "tuple";
+}
+var abiParameterWithoutTupleRegex2;
+var abiParameterWithTupleRegex2;
+var dynamicIntegerRegex2;
+var protectedKeywordsRegex2;
+var init_utils5 = __esm(() => {
+  init_regex3();
+  init_abiItem2();
+  init_abiParameter2();
+  init_signature2();
+  init_splitParameters2();
+  init_cache2();
+  init_signatures2();
+  abiParameterWithoutTupleRegex2 = /^(?<type>[a-zA-Z$_][a-zA-Z0-9$_]*(?:\spayable)?)(?<array>(?:\[\d*?\])+?)?(?:\s(?<modifier>calldata|indexed|memory|storage{1}))?(?:\s(?<name>[a-zA-Z$_][a-zA-Z0-9$_]*))?$/;
+  abiParameterWithTupleRegex2 = /^\((?<type>.+?)\)(?<array>(?:\[\d*?\])+?)?(?:\s(?<modifier>calldata|indexed|memory|storage{1}))?(?:\s(?<name>[a-zA-Z$_][a-zA-Z0-9$_]*))?$/;
+  dynamicIntegerRegex2 = /^u?int$/;
+  protectedKeywordsRegex2 = /^(?:after|alias|anonymous|apply|auto|byte|calldata|case|catch|constant|copyof|default|defined|error|event|external|false|final|function|immutable|implements|in|indexed|inline|internal|let|mapping|match|memory|mutable|null|of|override|partial|private|promise|public|pure|reference|relocatable|return|returns|sizeof|static|storage|struct|super|supports|switch|this|true|try|typedef|typeof|var|view|virtual)$/;
+});
+function parseStructs2(signatures) {
+  const shallowStructs = {};
+  const signaturesLength = signatures.length;
+  for (let i2 = 0;i2 < signaturesLength; i2++) {
+    const signature = signatures[i2];
+    if (!isStructSignature2(signature))
+      continue;
+    const match = execStructSignature2(signature);
+    if (!match)
+      throw new InvalidSignatureError2({ signature, type: "struct" });
+    const properties = match.properties.split(";");
+    const components = [];
+    const propertiesLength = properties.length;
+    for (let k = 0;k < propertiesLength; k++) {
+      const property = properties[k];
+      const trimmed = property.trim();
+      if (!trimmed)
+        continue;
+      const abiParameter = parseAbiParameter3(trimmed, {
+        type: "struct"
+      });
+      components.push(abiParameter);
+    }
+    if (!components.length)
+      throw new InvalidStructSignatureError2({ signature });
+    shallowStructs[match.name] = components;
+  }
+  const resolvedStructs = {};
+  const entries = Object.entries(shallowStructs);
+  const entriesLength = entries.length;
+  for (let i2 = 0;i2 < entriesLength; i2++) {
+    const [name, parameters] = entries[i2];
+    resolvedStructs[name] = resolveStructs2(parameters, shallowStructs);
+  }
+  return resolvedStructs;
+}
+function resolveStructs2(abiParameters = [], structs = {}, ancestors = new Set) {
+  const components = [];
+  const length = abiParameters.length;
+  for (let i2 = 0;i2 < length; i2++) {
+    const abiParameter = abiParameters[i2];
+    const isTuple = isTupleRegex2.test(abiParameter.type);
+    if (isTuple)
+      components.push(abiParameter);
+    else {
+      const match = execTyped2(typeWithoutTupleRegex2, abiParameter.type);
+      if (!match?.type)
+        throw new InvalidAbiTypeParameterError2({ abiParameter });
+      const { array, type } = match;
+      if (type in structs) {
+        if (ancestors.has(type))
+          throw new CircularReferenceError2({ type });
+        components.push({
+          ...abiParameter,
+          type: `tuple${array ?? ""}`,
+          components: resolveStructs2(structs[type], structs, new Set([...ancestors, type]))
+        });
+      } else {
+        if (isSolidityType2(type))
+          components.push(abiParameter);
+        else
+          throw new UnknownTypeError2({ type });
+      }
+    }
+  }
+  return components;
+}
+var typeWithoutTupleRegex2;
+var init_structs2 = __esm(() => {
+  init_regex3();
+  init_abiItem2();
+  init_abiParameter2();
+  init_signature2();
+  init_struct2();
+  init_signatures2();
+  init_utils5();
+  typeWithoutTupleRegex2 = /^(?<type>[a-zA-Z$_][a-zA-Z0-9$_]*)(?<array>(?:\[\d*?\])+?)?$/;
+});
+function parseAbi2(signatures) {
+  const structs = parseStructs2(signatures);
+  const abi = [];
+  const length = signatures.length;
+  for (let i2 = 0;i2 < length; i2++) {
+    const signature = signatures[i2];
+    if (isStructSignature2(signature))
+      continue;
+    abi.push(parseSignature2(signature, structs));
+  }
+  return abi;
+}
+var init_parseAbi2 = __esm(() => {
+  init_signatures2();
+  init_structs2();
+  init_utils5();
+});
+var init_exports2 = __esm(() => {
+  init_formatAbiItem3();
+  init_parseAbi2();
+});
+function formatAbiItem4(abiItem, { includeName = false } = {}) {
+  if (abiItem.type !== "function" && abiItem.type !== "event" && abiItem.type !== "error")
+    throw new InvalidDefinitionTypeError2(abiItem.type);
+  return `${abiItem.name}(${formatAbiParams2(abiItem.inputs, { includeName })})`;
+}
+function formatAbiParams2(params, { includeName = false } = {}) {
+  if (!params)
+    return "";
+  return params.map((param) => formatAbiParam2(param, { includeName })).join(includeName ? ", " : ",");
+}
+function formatAbiParam2(param, { includeName }) {
+  if (param.type.startsWith("tuple")) {
+    return `(${formatAbiParams2(param.components, { includeName })})${param.type.slice("tuple".length)}`;
+  }
+  return param.type + (includeName && param.name ? ` ${param.name}` : "");
+}
+var init_formatAbiItem4 = __esm(() => {
+  init_abi2();
+});
 function isHex2(value2, { even = false, strict = true } = {}) {
   if (!value2)
     return false;
@@ -5274,7 +6070,7 @@ function size2(value2) {
   return value2.length;
 }
 var init_size2 = () => {};
-var version3 = "2.57.16";
+var version4 = "2.57.16";
 function walk2(err, fn) {
   if (fn?.(err))
     return err;
@@ -5283,23 +6079,23 @@ function walk2(err, fn) {
   return fn ? null : err;
 }
 var errorConfig2;
-var BaseError3;
+var BaseError4;
 var init_base2 = __esm(() => {
   errorConfig2 = {
     getDocsUrl: ({ docsBaseUrl, docsPath: docsPath3 = "", docsSlug }) => docsPath3 ? `${docsBaseUrl ?? "https://viem.sh"}${docsPath3}${docsSlug ? `#${docsSlug}` : ""}` : undefined,
-    version: `viem@${version3}`
+    version: `viem@${version4}`
   };
-  BaseError3 = class BaseError32 extends Error {
+  BaseError4 = class BaseError42 extends Error {
     constructor(shortMessage, args = {}) {
       const details = (() => {
-        if (args.cause instanceof BaseError32)
+        if (args.cause instanceof BaseError42)
           return args.cause.details;
         if (args.cause?.message)
           return args.cause.message;
         return args.details;
       })();
       const docsPath3 = (() => {
-        if (args.cause instanceof BaseError32)
+        if (args.cause instanceof BaseError42)
           return args.cause.docsPath || args.docsPath;
         return args.docsPath;
       })();
@@ -5355,22 +6151,71 @@ var init_base2 = __esm(() => {
       this.metaMessages = args.metaMessages;
       this.name = args.name ?? this.name;
       this.shortMessage = shortMessage;
-      this.version = version3;
+      this.version = version4;
     }
     walk(fn) {
       return walk2(this, fn);
     }
   };
 });
+var AbiDecodingDataSizeTooSmallError2;
+var AbiDecodingZeroDataError2;
 var AbiEncodingArrayLengthMismatchError2;
 var AbiEncodingBytesSizeMismatchError2;
 var AbiEncodingLengthMismatchError2;
+var AbiFunctionNotFoundError2;
+var AbiFunctionOutputsNotFoundError2;
+var AbiItemAmbiguityError2;
 var InvalidAbiEncodingTypeError2;
+var InvalidAbiDecodingTypeError2;
 var InvalidArrayError2;
+var InvalidDefinitionTypeError2;
 var init_abi2 = __esm(() => {
+  init_formatAbiItem4();
   init_size2();
   init_base2();
-  AbiEncodingArrayLengthMismatchError2 = class AbiEncodingArrayLengthMismatchError22 extends BaseError3 {
+  AbiDecodingDataSizeTooSmallError2 = class AbiDecodingDataSizeTooSmallError22 extends BaseError4 {
+    constructor({ data, params, size: size3 }) {
+      super([`Data size of ${size3} bytes is too small for given parameters.`].join(`
+`), {
+        metaMessages: [
+          `Params: (${formatAbiParams2(params, { includeName: true })})`,
+          `Data:   ${data} (${size3} bytes)`
+        ],
+        name: "AbiDecodingDataSizeTooSmallError"
+      });
+      Object.defineProperty(this, "data", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      Object.defineProperty(this, "params", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      Object.defineProperty(this, "size", {
+        enumerable: true,
+        configurable: true,
+        writable: true,
+        value: undefined
+      });
+      this.data = data;
+      this.params = params;
+      this.size = size3;
+    }
+  };
+  AbiDecodingZeroDataError2 = class AbiDecodingZeroDataError22 extends BaseError4 {
+    constructor({ cause } = {}) {
+      super('Cannot decode zero data ("0x") with ABI parameters.', {
+        name: "AbiDecodingZeroDataError",
+        cause
+      });
+    }
+  };
+  AbiEncodingArrayLengthMismatchError2 = class AbiEncodingArrayLengthMismatchError22 extends BaseError4 {
     constructor({ expectedLength, givenLength, type }) {
       super([
         `ABI encoding array length mismatch for type ${type}.`,
@@ -5380,12 +6225,12 @@ var init_abi2 = __esm(() => {
 `), { name: "AbiEncodingArrayLengthMismatchError" });
     }
   };
-  AbiEncodingBytesSizeMismatchError2 = class AbiEncodingBytesSizeMismatchError22 extends BaseError3 {
+  AbiEncodingBytesSizeMismatchError2 = class AbiEncodingBytesSizeMismatchError22 extends BaseError4 {
     constructor({ expectedSize, value: value2 }) {
       super(`Size of bytes "${value2}" (bytes${size2(value2)}) does not match expected size (bytes${expectedSize}).`, { name: "AbiEncodingBytesSizeMismatchError" });
     }
   };
-  AbiEncodingLengthMismatchError2 = class AbiEncodingLengthMismatchError22 extends BaseError3 {
+  AbiEncodingLengthMismatchError2 = class AbiEncodingLengthMismatchError22 extends BaseError4 {
     constructor({ expectedLength, givenLength }) {
       super([
         "ABI encoding params/values length mismatch.",
@@ -5395,7 +6240,46 @@ var init_abi2 = __esm(() => {
 `), { name: "AbiEncodingLengthMismatchError" });
     }
   };
-  InvalidAbiEncodingTypeError2 = class InvalidAbiEncodingTypeError22 extends BaseError3 {
+  AbiFunctionNotFoundError2 = class AbiFunctionNotFoundError22 extends BaseError4 {
+    constructor(functionName, { docsPath: docsPath3 } = {}) {
+      super([
+        `Function ${functionName ? `"${functionName}" ` : ""}not found on ABI.`,
+        "Make sure you are using the correct ABI and that the function exists on it."
+      ].join(`
+`), {
+        docsPath: docsPath3,
+        name: "AbiFunctionNotFoundError"
+      });
+    }
+  };
+  AbiFunctionOutputsNotFoundError2 = class AbiFunctionOutputsNotFoundError22 extends BaseError4 {
+    constructor(functionName, { docsPath: docsPath3 }) {
+      super([
+        `Function "${functionName}" does not contain any \`outputs\` on ABI.`,
+        "Cannot decode function result without knowing what the parameter types are.",
+        "Make sure you are using the correct ABI and that the function exists on it."
+      ].join(`
+`), {
+        docsPath: docsPath3,
+        name: "AbiFunctionOutputsNotFoundError"
+      });
+    }
+  };
+  AbiItemAmbiguityError2 = class AbiItemAmbiguityError22 extends BaseError4 {
+    constructor(x, y) {
+      super("Found ambiguous types in overloaded ABI items.", {
+        metaMessages: [
+          `\`${x.type}\` in \`${formatAbiItem4(x.abiItem)}\`, and`,
+          `\`${y.type}\` in \`${formatAbiItem4(y.abiItem)}\``,
+          "",
+          "These types encode differently and cannot be distinguished at runtime.",
+          "Remove one of the ambiguous items in the ABI."
+        ],
+        name: "AbiItemAmbiguityError"
+      });
+    }
+  };
+  InvalidAbiEncodingTypeError2 = class InvalidAbiEncodingTypeError22 extends BaseError4 {
     constructor(type, { docsPath: docsPath3 }) {
       super([
         `Type "${type}" is not a valid encoding type.`,
@@ -5404,7 +6288,16 @@ var init_abi2 = __esm(() => {
 `), { docsPath: docsPath3, name: "InvalidAbiEncodingType" });
     }
   };
-  InvalidArrayError2 = class InvalidArrayError22 extends BaseError3 {
+  InvalidAbiDecodingTypeError2 = class InvalidAbiDecodingTypeError22 extends BaseError4 {
+    constructor(type, { docsPath: docsPath3 }) {
+      super([
+        `Type "${type}" is not a valid decoding type.`,
+        "Please provide a valid ABI type."
+      ].join(`
+`), { docsPath: docsPath3, name: "InvalidAbiDecodingType" });
+    }
+  };
+  InvalidArrayError2 = class InvalidArrayError22 extends BaseError4 {
     constructor(value2) {
       super([`Value "${value2}" is not a valid array.`].join(`
 `), {
@@ -5412,17 +6305,26 @@ var init_abi2 = __esm(() => {
       });
     }
   };
+  InvalidDefinitionTypeError2 = class InvalidDefinitionTypeError22 extends BaseError4 {
+    constructor(type) {
+      super([
+        `"${type}" is not a valid definition type.`,
+        'Valid types: "function", "event", "error"'
+      ].join(`
+`), { name: "InvalidDefinitionTypeError" });
+    }
+  };
 });
 var SliceOffsetOutOfBoundsError2;
 var SizeExceedsPaddingSizeError2;
 var init_data2 = __esm(() => {
   init_base2();
-  SliceOffsetOutOfBoundsError2 = class SliceOffsetOutOfBoundsError22 extends BaseError3 {
+  SliceOffsetOutOfBoundsError2 = class SliceOffsetOutOfBoundsError22 extends BaseError4 {
     constructor({ offset, position, size: size3 }) {
       super(`Slice ${position === "start" ? "starting" : "ending"} at offset "${offset}" is out-of-bounds (size: ${size3}).`, { name: "SliceOffsetOutOfBoundsError" });
     }
   };
-  SizeExceedsPaddingSizeError2 = class SizeExceedsPaddingSizeError22 extends BaseError3 {
+  SizeExceedsPaddingSizeError2 = class SizeExceedsPaddingSizeError22 extends BaseError4 {
     constructor({ size: size3, targetSize, type }) {
       super(`${type.charAt(0).toUpperCase()}${type.slice(1).toLowerCase()} size (${size3}) exceeds padding size (${targetSize}).`, { name: "SizeExceedsPaddingSizeError" });
     }
@@ -5465,26 +6367,77 @@ var init_pad2 = __esm(() => {
   init_data2();
 });
 var IntegerOutOfRangeError2;
+var InvalidBytesBooleanError2;
 var SizeOverflowError2;
 var init_encoding2 = __esm(() => {
   init_base2();
-  IntegerOutOfRangeError2 = class IntegerOutOfRangeError22 extends BaseError3 {
+  IntegerOutOfRangeError2 = class IntegerOutOfRangeError22 extends BaseError4 {
     constructor({ max, min, signed, size: size3, value: value2 }) {
       super(`Number "${value2}" is not in safe ${size3 ? `${size3 * 8}-bit ${signed ? "signed" : "unsigned"} ` : ""}integer range ${max ? `(${min} to ${max})` : `(above ${min})`}`, { name: "IntegerOutOfRangeError" });
     }
   };
-  SizeOverflowError2 = class SizeOverflowError22 extends BaseError3 {
+  InvalidBytesBooleanError2 = class InvalidBytesBooleanError22 extends BaseError4 {
+    constructor(bytes) {
+      super(`Bytes value "${bytes}" is not a valid boolean. The bytes array must contain a single byte of either a 0 or 1 value.`, {
+        name: "InvalidBytesBooleanError"
+      });
+    }
+  };
+  SizeOverflowError2 = class SizeOverflowError22 extends BaseError4 {
     constructor({ givenSize, maxSize }) {
       super(`Size cannot exceed ${maxSize} bytes. Given size: ${givenSize} bytes.`, { name: "SizeOverflowError" });
     }
   };
 });
+function trim2(hexOrBytes, { dir = "left" } = {}) {
+  let data = typeof hexOrBytes === "string" ? hexOrBytes.replace("0x", "") : hexOrBytes;
+  let sliceLength = 0;
+  for (let i2 = 0;i2 < data.length - 1; i2++) {
+    if (data[dir === "left" ? i2 : data.length - i2 - 1].toString() === "0")
+      sliceLength++;
+    else
+      break;
+  }
+  data = dir === "left" ? data.slice(sliceLength) : data.slice(0, data.length - sliceLength);
+  if (typeof hexOrBytes === "string") {
+    if (data.length === 1 && dir === "right")
+      data = `${data}0`;
+    return `0x${data.length % 2 === 1 ? `0${data}` : data}`;
+  }
+  return data;
+}
 function assertSize3(hexOrBytes, { size: size3 }) {
   if (size2(hexOrBytes) > size3)
     throw new SizeOverflowError2({
       givenSize: size2(hexOrBytes),
       maxSize: size3
     });
+}
+function hexToBigInt2(hex, opts = {}) {
+  const { signed } = opts;
+  if (opts.size)
+    assertSize3(hex, { size: opts.size });
+  const value2 = BigInt(hex);
+  if (!signed)
+    return value2;
+  const size3 = Math.ceil((hex.length - 2) / 2);
+  const max = (1n << BigInt(size3) * 8n - 1n) - 1n;
+  if (value2 <= max)
+    return value2;
+  return value2 - BigInt(`0x${"f".padStart(size3 * 2, "f")}`) - 1n;
+}
+function hexToNumber3(hex, opts = {}) {
+  const value2 = hexToBigInt2(hex, opts);
+  const number = Number(value2);
+  if (!Number.isSafeInteger(number))
+    throw new IntegerOutOfRangeError2({
+      max: `${Number.MAX_SAFE_INTEGER}`,
+      min: `${Number.MIN_SAFE_INTEGER}`,
+      signed: opts.signed,
+      size: opts.size,
+      value: `${value2}n`
+    });
+  return number;
 }
 var init_fromHex2 = __esm(() => {
   init_encoding2();
@@ -5603,7 +6556,7 @@ function hexToBytes4(hex_, opts = {}) {
     const nibbleLeft = charCodeToBase162(hexString.charCodeAt(j++));
     const nibbleRight = charCodeToBase162(hexString.charCodeAt(j++));
     if (nibbleLeft === undefined || nibbleRight === undefined) {
-      throw new BaseError3(`Invalid byte sequence ("${hexString[j - 2]}${hexString[j - 1]}" in "${hexString}").`);
+      throw new BaseError4(`Invalid byte sequence ("${hexString[j - 2]}${hexString[j - 1]}" in "${hexString}").`);
     }
     bytes[index] = nibbleLeft * 16 + nibbleRight;
   }
@@ -5730,7 +6683,7 @@ function createHasher4(hashCons) {
 }
 var isLE2;
 var swap32IfBE2;
-var init_utils5 = __esm(() => {
+var init_utils6 = __esm(() => {
   /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
   isLE2 = /* @__PURE__ */ (() => new Uint8Array(new Uint32Array([287454020]).buffer)[0] === 68)();
   swap32IfBE2 = isLE2 ? (u) => u : byteSwap322;
@@ -5794,7 +6747,7 @@ var gen2 = (suffix, blockLen, outputLen) => createHasher4(() => new Keccak2(bloc
 var keccak_2562;
 var init_sha32 = __esm(() => {
   init__u642();
-  init_utils5();
+  init_utils6();
   _0n7 = BigInt(0);
   _1n7 = BigInt(1);
   _2n5 = BigInt(2);
@@ -5977,10 +6930,97 @@ var init_lru2 = __esm(() => {
     }
   };
 });
+function hashSignature2(sig) {
+  return hash2(sig);
+}
+var hash2 = (value2) => keccak2562(toBytes4(value2));
+var init_hashSignature2 = __esm(() => {
+  init_toBytes2();
+  init_keccak2562();
+});
+function normalizeSignature2(signature) {
+  let active = true;
+  let current = "";
+  let level = 0;
+  let result = "";
+  let valid = false;
+  for (let i2 = 0;i2 < signature.length; i2++) {
+    const char = signature[i2];
+    if (["(", ")", ","].includes(char))
+      active = true;
+    if (char === "(")
+      level++;
+    if (char === ")")
+      level--;
+    if (!active)
+      continue;
+    if (level === 0) {
+      if (char === " " && ["event", "function", "error", ""].includes(result))
+        result = "";
+      else {
+        result += char;
+        if (char === ")") {
+          valid = true;
+          break;
+        }
+      }
+      continue;
+    }
+    if (char === " ") {
+      if (!current.endsWith(",") && !current.endsWith("(")) {
+        current = "";
+        active = false;
+      }
+      continue;
+    }
+    result += char;
+    current += char;
+  }
+  if (!valid)
+    throw new BaseError4("Unable to normalize signature.");
+  return result;
+}
+var init_normalizeSignature2 = __esm(() => {
+  init_base2();
+});
+var toSignature2 = (def) => {
+  const def_ = (() => {
+    if (typeof def === "string")
+      return def;
+    return formatAbiItem3(def);
+  })();
+  return normalizeSignature2(def_);
+};
+var init_toSignature2 = __esm(() => {
+  init_exports2();
+  init_normalizeSignature2();
+});
+function toSignatureHash2(fn) {
+  const definition = typeof fn === "string" ? fn : formatAbiItem3(fn);
+  const cached = signatureHashCache2.get(definition);
+  if (cached)
+    return cached;
+  const hash3 = hashSignature2(toSignature2(definition));
+  signatureHashCache2.set(definition, hash3);
+  return hash3;
+}
+var signatureHashCache2;
+var init_toSignatureHash2 = __esm(() => {
+  init_exports2();
+  init_lru2();
+  init_hashSignature2();
+  init_toSignature2();
+  signatureHashCache2 = /* @__PURE__ */ new LruMap2(8192);
+});
+var toEventSelector2;
+var init_toEventSelector2 = __esm(() => {
+  init_toSignatureHash2();
+  toEventSelector2 = toSignatureHash2;
+});
 var InvalidAddressError2;
 var init_address2 = __esm(() => {
   init_base2();
-  InvalidAddressError2 = class InvalidAddressError22 extends BaseError3 {
+  InvalidAddressError2 = class InvalidAddressError22 extends BaseError4 {
     constructor({ address: address2 }) {
       super(`Address "${address2}" is invalid.`, {
         metaMessages: [
@@ -5996,13 +7036,13 @@ function checksumAddress2(address_, chainId) {
   if (checksumAddressCache2.has(`${address_}.${chainId}`))
     return checksumAddressCache2.get(`${address_}.${chainId}`);
   const hexAddress = chainId ? `${chainId}${address_.toLowerCase()}` : address_.substring(2).toLowerCase();
-  const hash2 = keccak2562(stringToBytes2(hexAddress), "bytes");
+  const hash3 = keccak2562(stringToBytes2(hexAddress), "bytes");
   const address2 = (chainId ? hexAddress.substring(`${chainId}0x`.length) : hexAddress).split("");
   for (let i2 = 0;i2 < 40; i2 += 2) {
-    if (hash2[i2 >> 1] >> 4 >= 8 && address2[i2]) {
+    if (hash3[i2 >> 1] >> 4 >= 8 && address2[i2]) {
       address2[i2] = address2[i2].toUpperCase();
     }
-    if ((hash2[i2 >> 1] & 15) >= 8 && address2[i2 + 1]) {
+    if ((hash3[i2 >> 1] & 15) >= 8 && address2[i2 + 1]) {
       address2[i2 + 1] = address2[i2 + 1].toUpperCase();
     }
   }
@@ -6114,9 +7154,9 @@ var init_slice2 = __esm(() => {
   init_data2();
   init_size2();
 });
-var integerRegex3;
-var init_regex3 = __esm(() => {
-  integerRegex3 = /^(u?int)(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?$/;
+var integerRegex4;
+var init_regex4 = __esm(() => {
+  integerRegex4 = /^(u?int)(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?$/;
 });
 function encodeAbiParameters2(params, values) {
   if (params.length !== values.length)
@@ -6156,7 +7196,7 @@ function prepareParam2({ param, value: value2 }) {
   }
   if (param.type.startsWith("uint") || param.type.startsWith("int")) {
     const signed = param.type.startsWith("int");
-    const [, , size3 = "256"] = integerRegex3.exec(param.type) ?? [];
+    const [, , size3 = "256"] = integerRegex4.exec(param.type) ?? [];
     return encodeNumber2(value2, {
       signed,
       size: Number(size3)
@@ -6263,7 +7303,7 @@ function encodeBytes2(value2, { param }) {
 }
 function encodeBool2(value2) {
   if (typeof value2 !== "boolean")
-    throw new BaseError3(`Invalid boolean value: "${value2}" (type: ${typeof value2}). Expected: \`true\` or \`false\`.`);
+    throw new BaseError4(`Invalid boolean value: "${value2}" (type: ${typeof value2}). Expected: \`true\` or \`false\`.`);
   return { dynamic: false, encoded: padHex2(boolToHex2(value2)) };
 }
 function encodeNumber2(value2, { signed, size: size3 = 256 }) {
@@ -6352,7 +7392,680 @@ var init_encodeAbiParameters2 = __esm(() => {
   init_size2();
   init_slice2();
   init_toHex2();
-  init_regex3();
+  init_regex4();
+});
+var toFunctionSelector2 = (fn) => slice2(toSignatureHash2(fn), 0, 4);
+var init_toFunctionSelector2 = __esm(() => {
+  init_slice2();
+  init_toSignatureHash2();
+});
+function getAbiItem2(parameters) {
+  const { abi, args = [], name } = parameters;
+  const isSelector = isHex2(name, { strict: false });
+  const abiItems = abi.filter((abiItem) => {
+    if (isSelector) {
+      if (abiItem.type === "function")
+        return toFunctionSelector2(abiItem) === name;
+      if (abiItem.type === "event")
+        return toEventSelector2(abiItem) === name;
+      return false;
+    }
+    return "name" in abiItem && abiItem.name === name;
+  });
+  if (abiItems.length === 0)
+    return;
+  if (abiItems.length === 1)
+    return abiItems[0];
+  let matchedAbiItem;
+  for (const abiItem of abiItems) {
+    if (!("inputs" in abiItem))
+      continue;
+    if (!args || args.length === 0) {
+      if (!abiItem.inputs || abiItem.inputs.length === 0)
+        return abiItem;
+      continue;
+    }
+    if (!abiItem.inputs)
+      continue;
+    if (abiItem.inputs.length === 0)
+      continue;
+    if (abiItem.inputs.length !== args.length)
+      continue;
+    const matched = args.every((arg, index) => {
+      const abiParameter = "inputs" in abiItem && abiItem.inputs[index];
+      if (!abiParameter)
+        return false;
+      return isArgOfType2(arg, abiParameter);
+    });
+    if (matched) {
+      if (matchedAbiItem && "inputs" in matchedAbiItem && matchedAbiItem.inputs) {
+        const ambiguousTypes = getAmbiguousTypes2(abiItem.inputs, matchedAbiItem.inputs, args);
+        if (ambiguousTypes)
+          throw new AbiItemAmbiguityError2({
+            abiItem,
+            type: ambiguousTypes[0]
+          }, {
+            abiItem: matchedAbiItem,
+            type: ambiguousTypes[1]
+          });
+      }
+      matchedAbiItem = abiItem;
+    }
+  }
+  if (matchedAbiItem)
+    return matchedAbiItem;
+  return abiItems[0];
+}
+function isArgOfType2(arg, abiParameter) {
+  const argType = typeof arg;
+  const abiParameterType = abiParameter.type;
+  switch (abiParameterType) {
+    case "address":
+      return isAddress2(arg, { strict: false });
+    case "bool":
+      return argType === "boolean";
+    case "function":
+      return argType === "string";
+    case "string":
+      return argType === "string";
+    default: {
+      if (abiParameterType === "tuple" && "components" in abiParameter)
+        return Object.values(abiParameter.components).every((component, index) => {
+          return argType === "object" && isArgOfType2(getComponentValue2(arg, component, index), component);
+        });
+      if (/^u?int(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?$/.test(abiParameterType)) {
+        if (typeof arg !== "bigint" && typeof arg !== "number")
+          return false;
+        if (typeof arg === "number" && !Number.isInteger(arg))
+          return false;
+        const signed = abiParameterType.startsWith("int");
+        const bits = Number.parseInt(abiParameterType.replace(/^u?int/, "") || "256", 10);
+        const max = 2n ** (BigInt(bits) - (signed ? 1n : 0n)) - 1n;
+        const min = signed ? -max - 1n : 0n;
+        return arg >= min && arg <= max;
+      }
+      if (/^bytes([1-9]|1[0-9]|2[0-9]|3[0-2])?$/.test(abiParameterType)) {
+        if (typeof arg !== "string" && !(arg instanceof Uint8Array))
+          return false;
+        const bytes = abiParameterType.slice(5);
+        if (!bytes)
+          return true;
+        if (typeof arg === "string" && !isHex2(arg))
+          return false;
+        return size2(arg) === Number.parseInt(bytes, 10);
+      }
+      const arrayComponents = getArrayComponents2(abiParameterType);
+      if (arrayComponents) {
+        const [length, type] = arrayComponents;
+        return Array.isArray(arg) && (length === null || arg.length === length) && arg.every((x) => isArgOfType2(x, { ...abiParameter, type }));
+      }
+      return false;
+    }
+  }
+}
+function getAmbiguousTypes2(sourceParameters, targetParameters, args) {
+  for (const parameterIndex in sourceParameters) {
+    const sourceParameter = sourceParameters[parameterIndex];
+    const targetParameter = targetParameters[parameterIndex];
+    if (!targetParameter)
+      continue;
+    if (sourceParameter.type === "tuple" && targetParameter.type === "tuple" && "components" in sourceParameter && "components" in targetParameter) {
+      const value3 = args[parameterIndex];
+      const types5 = getAmbiguousTypes2(sourceParameter.components, targetParameter.components, sourceParameter.components.map((component, index) => getComponentValue2(value3, component, index)));
+      if (types5)
+        return types5;
+      continue;
+    }
+    const sourceArray = getArrayComponents2(sourceParameter.type);
+    const targetArray = getArrayComponents2(targetParameter.type);
+    if (sourceArray && targetArray) {
+      const types5 = getAmbiguousTypes2([{ ...sourceParameter, type: sourceArray[1] }], [{ ...targetParameter, type: targetArray[1] }], [args[parameterIndex]?.[0]]);
+      if (types5)
+        return types5;
+      if (sourceArray[1] === targetArray[1] && sourceParameter.type !== targetParameter.type)
+        return [sourceParameter.type, targetParameter.type];
+      continue;
+    }
+    const types4 = [sourceParameter.type, targetParameter.type];
+    const value2 = args[parameterIndex];
+    const ambiguous = (() => {
+      if (types4.includes("address") && (types4.includes("string") || types4.includes("bytes")))
+        return value2 === undefined || isAddress2(value2, { strict: false });
+      if (sourceParameter.type !== targetParameter.type)
+        return true;
+      return false;
+    })();
+    if (ambiguous)
+      return types4;
+  }
+  return;
+}
+function getComponentValue2(arg, component, index) {
+  if (Array.isArray(arg))
+    return arg[index];
+  return arg?.[component.name];
+}
+var init_getAbiItem2 = __esm(() => {
+  init_abi2();
+  init_isAddress2();
+  init_size2();
+  init_toEventSelector2();
+  init_toFunctionSelector2();
+  init_encodeAbiParameters2();
+});
+function prepareEncodeFunctionData2(parameters) {
+  const { abi, args, functionName } = parameters;
+  let abiItem = abi[0];
+  if (functionName) {
+    const item = getAbiItem2({
+      abi,
+      args,
+      name: functionName
+    });
+    if (!item)
+      throw new AbiFunctionNotFoundError2(functionName, { docsPath: docsPath3 });
+    abiItem = item;
+  }
+  if (abiItem.type !== "function")
+    throw new AbiFunctionNotFoundError2(undefined, { docsPath: docsPath3 });
+  return {
+    abi: [abiItem],
+    functionName: toFunctionSelector2(formatAbiItem4(abiItem))
+  };
+}
+var docsPath3 = "/docs/contract/encodeFunctionData";
+var init_prepareEncodeFunctionData2 = __esm(() => {
+  init_abi2();
+  init_toFunctionSelector2();
+  init_formatAbiItem4();
+  init_getAbiItem2();
+});
+function encodeFunctionData2(parameters) {
+  const { args } = parameters;
+  const { abi, functionName } = (() => {
+    if (parameters.abi.length === 1 && parameters.functionName?.startsWith("0x"))
+      return parameters;
+    return prepareEncodeFunctionData2(parameters);
+  })();
+  const abiItem = abi[0];
+  const signature = functionName;
+  const data = "inputs" in abiItem && abiItem.inputs ? encodeAbiParameters2(abiItem.inputs, args ?? []) : undefined;
+  return concatHex2([signature, data ?? "0x"]);
+}
+var init_encodeFunctionData2 = __esm(() => {
+  init_encodeAbiParameters2();
+  init_prepareEncodeFunctionData2();
+});
+var NegativeOffsetError2;
+var PositionOutOfBoundsError2;
+var RecursiveReadLimitExceededError2;
+var init_cursor3 = __esm(() => {
+  init_base2();
+  NegativeOffsetError2 = class NegativeOffsetError22 extends BaseError4 {
+    constructor({ offset }) {
+      super(`Offset \`${offset}\` cannot be negative.`, {
+        name: "NegativeOffsetError"
+      });
+    }
+  };
+  PositionOutOfBoundsError2 = class PositionOutOfBoundsError22 extends BaseError4 {
+    constructor({ length, position }) {
+      super(`Position \`${position}\` is out of bounds (\`0 < position < ${length}\`).`, { name: "PositionOutOfBoundsError" });
+    }
+  };
+  RecursiveReadLimitExceededError2 = class RecursiveReadLimitExceededError22 extends BaseError4 {
+    constructor({ count, limit }) {
+      super(`Recursive read limit of \`${limit}\` exceeded (recursive read count: \`${count}\`).`, { name: "RecursiveReadLimitExceededError" });
+    }
+  };
+});
+function createCursor2(bytes, { recursiveReadLimit = 8192 } = {}) {
+  const cursor = Object.create(staticCursor2);
+  cursor.bytes = bytes;
+  cursor.dataView = new DataView(bytes.buffer ?? bytes, bytes.byteOffset, bytes.byteLength);
+  cursor.positionReadCount = new Map;
+  cursor.recursiveReadLimit = recursiveReadLimit;
+  return cursor;
+}
+var staticCursor2;
+var init_cursor4 = __esm(() => {
+  init_cursor3();
+  staticCursor2 = {
+    bytes: new Uint8Array,
+    dataView: new DataView(new ArrayBuffer(0)),
+    position: 0,
+    positionReadCount: new Map,
+    recursiveReadCount: 0,
+    recursiveReadLimit: Number.POSITIVE_INFINITY,
+    assertReadLimit() {
+      if (this.recursiveReadCount >= this.recursiveReadLimit)
+        throw new RecursiveReadLimitExceededError2({
+          count: this.recursiveReadCount + 1,
+          limit: this.recursiveReadLimit
+        });
+    },
+    assertPosition(position) {
+      if (position < 0 || position > this.bytes.length - 1)
+        throw new PositionOutOfBoundsError2({
+          length: this.bytes.length,
+          position
+        });
+    },
+    decrementPosition(offset) {
+      if (offset < 0)
+        throw new NegativeOffsetError2({ offset });
+      const position = this.position - offset;
+      this.assertPosition(position);
+      this.position = position;
+    },
+    getReadCount(position) {
+      return this.positionReadCount.get(position || this.position) || 0;
+    },
+    incrementPosition(offset) {
+      if (offset < 0)
+        throw new NegativeOffsetError2({ offset });
+      const position = this.position + offset;
+      this.assertPosition(position);
+      this.position = position;
+    },
+    inspectByte(position_) {
+      const position = position_ ?? this.position;
+      this.assertPosition(position);
+      return this.bytes[position];
+    },
+    inspectBytes(length, position_) {
+      const position = position_ ?? this.position;
+      this.assertPosition(position + length - 1);
+      return this.bytes.subarray(position, position + length);
+    },
+    inspectUint8(position_) {
+      const position = position_ ?? this.position;
+      this.assertPosition(position);
+      return this.bytes[position];
+    },
+    inspectUint16(position_) {
+      const position = position_ ?? this.position;
+      this.assertPosition(position + 1);
+      return this.dataView.getUint16(position);
+    },
+    inspectUint24(position_) {
+      const position = position_ ?? this.position;
+      this.assertPosition(position + 2);
+      return (this.dataView.getUint16(position) << 8) + this.dataView.getUint8(position + 2);
+    },
+    inspectUint32(position_) {
+      const position = position_ ?? this.position;
+      this.assertPosition(position + 3);
+      return this.dataView.getUint32(position);
+    },
+    pushByte(byte) {
+      this.assertPosition(this.position);
+      this.bytes[this.position] = byte;
+      this.position++;
+    },
+    pushBytes(bytes) {
+      this.assertPosition(this.position + bytes.length - 1);
+      this.bytes.set(bytes, this.position);
+      this.position += bytes.length;
+    },
+    pushUint8(value2) {
+      this.assertPosition(this.position);
+      this.bytes[this.position] = value2;
+      this.position++;
+    },
+    pushUint16(value2) {
+      this.assertPosition(this.position + 1);
+      this.dataView.setUint16(this.position, value2);
+      this.position += 2;
+    },
+    pushUint24(value2) {
+      this.assertPosition(this.position + 2);
+      this.dataView.setUint16(this.position, value2 >> 8);
+      this.dataView.setUint8(this.position + 2, value2 & ~4294967040);
+      this.position += 3;
+    },
+    pushUint32(value2) {
+      this.assertPosition(this.position + 3);
+      this.dataView.setUint32(this.position, value2);
+      this.position += 4;
+    },
+    readByte() {
+      this.assertReadLimit();
+      this._touch();
+      const value2 = this.inspectByte();
+      this.position++;
+      return value2;
+    },
+    readBytes(length, size3) {
+      this.assertReadLimit();
+      this._touch();
+      const value2 = this.inspectBytes(length);
+      this.position += size3 ?? length;
+      return value2;
+    },
+    readUint8() {
+      this.assertReadLimit();
+      this._touch();
+      const value2 = this.inspectUint8();
+      this.position += 1;
+      return value2;
+    },
+    readUint16() {
+      this.assertReadLimit();
+      this._touch();
+      const value2 = this.inspectUint16();
+      this.position += 2;
+      return value2;
+    },
+    readUint24() {
+      this.assertReadLimit();
+      this._touch();
+      const value2 = this.inspectUint24();
+      this.position += 3;
+      return value2;
+    },
+    readUint32() {
+      this.assertReadLimit();
+      this._touch();
+      const value2 = this.inspectUint32();
+      this.position += 4;
+      return value2;
+    },
+    get remaining() {
+      return this.bytes.length - this.position;
+    },
+    setPosition(position) {
+      const oldPosition = this.position;
+      this.assertPosition(position);
+      this.position = position;
+      return () => this.position = oldPosition;
+    },
+    _touch() {
+      if (this.recursiveReadLimit === Number.POSITIVE_INFINITY)
+        return;
+      const count = this.getReadCount();
+      this.positionReadCount.set(this.position, count + 1);
+      if (count > 0)
+        this.recursiveReadCount++;
+    }
+  };
+});
+function bytesToBigInt2(bytes, opts = {}) {
+  if (typeof opts.size !== "undefined")
+    assertSize3(bytes, { size: opts.size });
+  const hex = bytesToHex4(bytes);
+  return hexToBigInt2(hex, opts);
+}
+function bytesToBool2(bytes_, opts = {}) {
+  let bytes = bytes_;
+  if (typeof opts.size !== "undefined") {
+    assertSize3(bytes, { size: opts.size });
+    bytes = trim2(bytes);
+  }
+  if (bytes.length > 1 || bytes[0] > 1)
+    throw new InvalidBytesBooleanError2(bytes);
+  return Boolean(bytes[0]);
+}
+function bytesToNumber2(bytes, opts = {}) {
+  if (typeof opts.size !== "undefined")
+    assertSize3(bytes, { size: opts.size });
+  const hex = bytesToHex4(bytes);
+  return hexToNumber3(hex, opts);
+}
+function bytesToString2(bytes_, opts = {}) {
+  let bytes = bytes_;
+  if (typeof opts.size !== "undefined") {
+    assertSize3(bytes, { size: opts.size });
+    bytes = trim2(bytes, { dir: "right" });
+  }
+  return new TextDecoder().decode(bytes);
+}
+var init_fromBytes2 = __esm(() => {
+  init_encoding2();
+  init_fromHex2();
+  init_toHex2();
+});
+function decodeAbiParameters2(params, data) {
+  const bytes = typeof data === "string" ? hexToBytes4(data) : data;
+  const cursor = createCursor2(bytes);
+  if (size2(bytes) === 0 && params.length > 0)
+    throw new AbiDecodingZeroDataError2;
+  if (size2(data) && size2(data) < 32)
+    throw new AbiDecodingDataSizeTooSmallError2({
+      data: typeof data === "string" ? data : bytesToHex4(data),
+      params,
+      size: size2(data)
+    });
+  let consumed = 0;
+  const values = [];
+  for (let i2 = 0;i2 < params.length; ++i2) {
+    const param = params[i2];
+    if (consumed < bytes.length)
+      cursor.setPosition(consumed);
+    const [data2, consumed_] = decodeParameter2(cursor, param, {
+      staticPosition: 0
+    });
+    consumed += consumed_;
+    values.push(data2);
+  }
+  return values;
+}
+function decodeParameter2(cursor, param, { staticPosition }) {
+  const arrayComponents = getArrayComponents2(param.type);
+  if (arrayComponents) {
+    const [length, type] = arrayComponents;
+    return decodeArray2(cursor, { ...param, type }, { length, staticPosition });
+  }
+  if (param.type === "tuple")
+    return decodeTuple2(cursor, param, { staticPosition });
+  if (param.type === "address")
+    return decodeAddress2(cursor);
+  if (param.type === "bool")
+    return decodeBool2(cursor);
+  if (param.type.startsWith("bytes"))
+    return decodeBytes2(cursor, param, { staticPosition });
+  if (param.type.startsWith("uint") || param.type.startsWith("int"))
+    return decodeNumber2(cursor, param);
+  if (param.type === "string")
+    return decodeString2(cursor, { staticPosition });
+  throw new InvalidAbiDecodingTypeError2(param.type, {
+    docsPath: "/docs/contract/decodeAbiParameters"
+  });
+}
+function decodeAddress2(cursor) {
+  const value2 = cursor.readBytes(32);
+  return [checksumAddress2(bytesToHex4(sliceBytes2(value2, -20))), 32];
+}
+function decodeArray2(cursor, param, { length, staticPosition }) {
+  if (length === null) {
+    const offset = bytesToNumber2(cursor.readBytes(sizeOfOffset2));
+    const start = staticPosition + offset;
+    const startOfData = start + sizeOfLength2;
+    cursor.setPosition(start);
+    const length2 = bytesToNumber2(cursor.readBytes(sizeOfLength2));
+    const dynamicChild = hasDynamicChild2(param);
+    let consumed2 = 0;
+    const value3 = [];
+    for (let i2 = 0;i2 < length2; ++i2) {
+      cursor.setPosition(startOfData + (dynamicChild ? i2 * 32 : consumed2));
+      const [data, consumed_] = decodeParameter2(cursor, param, {
+        staticPosition: startOfData
+      });
+      consumed2 += consumed_;
+      value3.push(data);
+      if (consumed_ === 0) {
+        cursor.assertReadLimit();
+        cursor._touch();
+      }
+    }
+    cursor.setPosition(staticPosition + 32);
+    return [value3, 32];
+  }
+  if (hasDynamicChild2(param)) {
+    const offset = bytesToNumber2(cursor.readBytes(sizeOfOffset2));
+    const start = staticPosition + offset;
+    const value3 = [];
+    for (let i2 = 0;i2 < length; ++i2) {
+      cursor.setPosition(start + i2 * 32);
+      const [data] = decodeParameter2(cursor, param, {
+        staticPosition: start
+      });
+      value3.push(data);
+    }
+    cursor.setPosition(staticPosition + 32);
+    return [value3, 32];
+  }
+  let consumed = 0;
+  const value2 = [];
+  for (let i2 = 0;i2 < length; ++i2) {
+    const [data, consumed_] = decodeParameter2(cursor, param, {
+      staticPosition: staticPosition + consumed
+    });
+    consumed += consumed_;
+    value2.push(data);
+    if (consumed_ === 0) {
+      cursor.assertReadLimit();
+      cursor._touch();
+    }
+  }
+  return [value2, consumed];
+}
+function decodeBool2(cursor) {
+  return [bytesToBool2(cursor.readBytes(32), { size: 32 }), 32];
+}
+function decodeBytes2(cursor, param, { staticPosition }) {
+  const [_, size3] = param.type.split("bytes");
+  if (!size3) {
+    const offset = bytesToNumber2(cursor.readBytes(32));
+    cursor.setPosition(staticPosition + offset);
+    const length = bytesToNumber2(cursor.readBytes(32));
+    if (length === 0) {
+      cursor.setPosition(staticPosition + 32);
+      return ["0x", 32];
+    }
+    const data = cursor.readBytes(length);
+    cursor.setPosition(staticPosition + 32);
+    return [bytesToHex4(data), 32];
+  }
+  const value2 = bytesToHex4(cursor.readBytes(Number.parseInt(size3, 10), 32));
+  return [value2, 32];
+}
+function decodeNumber2(cursor, param) {
+  const signed = param.type.startsWith("int");
+  const size3 = Number.parseInt(param.type.split("int")[1] || "256", 10);
+  const value2 = cursor.readBytes(32);
+  return [
+    size3 > 48 ? bytesToBigInt2(value2, { signed }) : bytesToNumber2(value2, { signed }),
+    32
+  ];
+}
+function decodeTuple2(cursor, param, { staticPosition }) {
+  const hasUnnamedChild = param.components.length === 0 || param.components.some(({ name }) => !name);
+  const value2 = hasUnnamedChild ? [] : {};
+  let consumed = 0;
+  if (hasDynamicChild2(param)) {
+    const offset = bytesToNumber2(cursor.readBytes(sizeOfOffset2));
+    const start = staticPosition + offset;
+    for (let i2 = 0;i2 < param.components.length; ++i2) {
+      const component = param.components[i2];
+      cursor.setPosition(start + consumed);
+      const [data, consumed_] = decodeParameter2(cursor, component, {
+        staticPosition: start
+      });
+      consumed += consumed_;
+      value2[hasUnnamedChild ? i2 : component?.name] = data;
+    }
+    cursor.setPosition(staticPosition + 32);
+    return [value2, 32];
+  }
+  for (let i2 = 0;i2 < param.components.length; ++i2) {
+    const component = param.components[i2];
+    const [data, consumed_] = decodeParameter2(cursor, component, {
+      staticPosition
+    });
+    value2[hasUnnamedChild ? i2 : component?.name] = data;
+    consumed += consumed_;
+  }
+  return [value2, consumed];
+}
+function decodeString2(cursor, { staticPosition }) {
+  const offset = bytesToNumber2(cursor.readBytes(32));
+  const start = staticPosition + offset;
+  cursor.setPosition(start);
+  const length = bytesToNumber2(cursor.readBytes(32));
+  if (length === 0) {
+    cursor.setPosition(staticPosition + 32);
+    return ["", 32];
+  }
+  const data = cursor.readBytes(length, 32);
+  const value2 = bytesToString2(data);
+  cursor.setPosition(staticPosition + 32);
+  return [value2, 32];
+}
+function hasDynamicChild2(param) {
+  const { type } = param;
+  if (type === "string")
+    return true;
+  if (type === "bytes")
+    return true;
+  if (type.endsWith("[]"))
+    return true;
+  if (type === "tuple")
+    return param.components?.some(hasDynamicChild2);
+  const arrayComponents = getArrayComponents2(param.type);
+  if (arrayComponents && hasDynamicChild2({ ...param, type: arrayComponents[1] }))
+    return true;
+  return false;
+}
+var sizeOfLength2 = 32;
+var sizeOfOffset2 = 32;
+var init_decodeAbiParameters2 = __esm(() => {
+  init_abi2();
+  init_getAddress2();
+  init_cursor4();
+  init_size2();
+  init_slice2();
+  init_fromBytes2();
+  init_toBytes2();
+  init_toHex2();
+  init_encodeAbiParameters2();
+});
+function isAddressEqual(a, b) {
+  if (!isAddress2(a, { strict: false }))
+    throw new InvalidAddressError2({ address: a });
+  if (!isAddress2(b, { strict: false }))
+    throw new InvalidAddressError2({ address: b });
+  return a.toLowerCase() === b.toLowerCase();
+}
+var init_isAddressEqual = __esm(() => {
+  init_address2();
+  init_isAddress2();
+});
+function decodeFunctionResult2(parameters) {
+  const { abi, args, functionName, data } = parameters;
+  let abiItem = abi[0];
+  if (functionName) {
+    const item = getAbiItem2({ abi, args, name: functionName });
+    if (!item)
+      throw new AbiFunctionNotFoundError2(functionName, { docsPath: docsPath4 });
+    abiItem = item;
+  }
+  if (abiItem.type !== "function")
+    throw new AbiFunctionNotFoundError2(undefined, { docsPath: docsPath4 });
+  if (!abiItem.outputs)
+    throw new AbiFunctionOutputsNotFoundError2(abiItem.name, { docsPath: docsPath4 });
+  const values = decodeAbiParameters2(abiItem.outputs, data);
+  if (values && values.length > 1)
+    return values;
+  if (values && values.length === 1)
+    return values[0];
+  return;
+}
+var docsPath4 = "/docs/contract/decodeFunctionResult";
+var init_decodeFunctionResult2 = __esm(() => {
+  init_abi2();
+  init_decodeAbiParameters2();
+  init_getAbiItem2();
 });
 var UnrecognisedErrorCode = -1;
 var Canceled = 1;
@@ -10326,8 +12039,8 @@ function publicKeyToAddress(publicKey) {
 init_size();
 init_fromHex();
 init_toHex();
-async function recoverPublicKey({ hash: hash2, signature }) {
-  const hashHex = isHex(hash2) ? hash2 : toHex(hash2);
+async function recoverPublicKey({ hash: hash22, signature }) {
+  const hashHex = isHex(hash22) ? hash22 : toHex(hash22);
   const { secp256k1: secp256k12 } = await Promise.resolve().then(() => (init_secp256k1(), exports_secp256k1));
   const signature_ = (() => {
     if (typeof signature === "object" && "r" in signature && "s" in signature) {
@@ -10355,8 +12068,8 @@ function toRecoveryBit(yParityOrV) {
     return 1;
   throw new Error("Invalid yParityOrV value");
 }
-async function recoverAddress({ hash: hash2, signature }) {
-  return publicKeyToAddress(await recoverPublicKey({ hash: hash2, signature }));
+async function recoverAddress({ hash: hash22, signature }) {
+  return publicKeyToAddress(await recoverPublicKey({ hash: hash22, signature }));
 }
 var zeroAddress = "0x0000000000000000000000000000000000000000";
 init_decodeFunctionResult();
@@ -13489,9 +15202,9 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
         esc = escape(ae);
       rest = rest.split(ae).join(esc);
     }
-  var hash2 = rest.indexOf("#");
-  if (hash2 !== -1)
-    this.hash = rest.substr(hash2), rest = rest.slice(0, hash2);
+  var hash22 = rest.indexOf("#");
+  if (hash22 !== -1)
+    this.hash = rest.substr(hash22), rest = rest.slice(0, hash22);
   var qm = rest.indexOf("?");
   if (qm !== -1) {
     if (this.search = rest.substr(qm), this.query = rest.substr(qm + 1), parseQueryString)
@@ -13513,7 +15226,7 @@ Url.prototype.format = function() {
   var auth = this.auth || "";
   if (auth)
     auth = encodeURIComponent(auth), auth = auth.replace(/%3A/i, ":"), auth += "@";
-  var protocol = this.protocol || "", pathname = this.pathname || "", hash2 = this.hash || "", host = false, query = "";
+  var protocol = this.protocol || "", pathname = this.pathname || "", hash22 = this.hash || "", host = false, query = "";
   if (this.host)
     host = auth + this.host;
   else if (this.hostname) {
@@ -13530,13 +15243,13 @@ Url.prototype.format = function() {
       pathname = "/" + pathname;
   } else if (!host)
     host = "";
-  if (hash2 && hash2.charAt(0) !== "#")
-    hash2 = "#" + hash2;
+  if (hash22 && hash22.charAt(0) !== "#")
+    hash22 = "#" + hash22;
   if (search && search.charAt(0) !== "?")
     search = "?" + search;
   return pathname = pathname.replace(/[?#]/g, function(match) {
     return encodeURIComponent(match);
-  }), search = search.replace("#", "%23"), protocol + host + pathname + search + hash2;
+  }), search = search.replace("#", "%23"), protocol + host + pathname + search + hash22;
 };
 Url.prototype.resolve = function(relative) {
   return this.resolveObject(urlParse(relative, false, true)).format();
@@ -24096,6 +25809,7 @@ var sendErrorResponse = (error2) => {
   }
   hostBindings.sendResponse(payload);
 };
+init_exports2();
 init_toBytes2();
 init_toHex2();
 init_keccak2562();
@@ -24106,10 +25820,10 @@ function encodedLabelToLabelhash(label) {
     return null;
   if (label.indexOf("]") !== 65)
     return null;
-  const hash2 = `0x${label.slice(1, 65)}`;
-  if (!isHex2(hash2))
+  const hash3 = `0x${label.slice(1, 65)}`;
+  if (!isHex2(hash3))
     return null;
-  return hash2;
+  return hash3;
 }
 function namehash(name) {
   let result = new Uint8Array(32).fill(0);
@@ -24123,9 +25837,12 @@ function namehash(name) {
   }
   return bytesToHex4(result);
 }
+init_decodeFunctionResult2();
 init_encodeAbiParameters2();
+init_encodeFunctionData2();
 init_getAddress2();
 init_isAddress2();
+init_isAddressEqual();
 init_toHex2();
 init_keccak2562();
 function canonicalJson(value2) {
@@ -24182,9 +25899,9 @@ var REFUSED = 2;
 function evaluateAttestation(input) {
   const { action, clearance, limits } = input;
   const problems = [];
-  if (clearance.agent !== action.account)
+  if (!isAddressEqual(clearance.agent, action.account))
     problems.push("Clearance agent isn't the action's account");
-  if (limits.account !== action.account)
+  if (!isAddressEqual(limits.account, action.account))
     problems.push("ENS record binds this name to another account");
   if (clearance.poolId !== poolId(action.pool))
     problems.push("Clearance pool isn't the action's pool");
@@ -24259,10 +25976,64 @@ function parseLimits(raw) {
     ownerSub: raw.ownerSub
   };
 }
-function agentNode(name) {
-  return namehash(name);
+var ROLE = {
+  registrar: 1n << 0n,
+  setParent: 1n << 8n,
+  setSubregistry: 1n << 20n,
+  setResolver: 1n << 24n
+};
+var admin = (role) => role << 128n;
+var RESOLVER_SET_TEXT = 1n << 4n;
+var OWNER_ROLES = ROLE.setSubregistry | admin(ROLE.setSubregistry) | ROLE.setResolver | admin(ROLE.setResolver);
+var REGISTRY_ROOT_ROLES = ROLE.registrar | admin(ROLE.registrar) | ROLE.setParent | admin(ROLE.setParent);
+var ensv2Abi = parseAbi2([
+  "function deployProxy(address implementation, uint256 salt, bytes data) returns (address)",
+  "event ProxyDeployed(address indexed sender, address indexed proxyAddress, uint256 salt, address implementation)",
+  "function initialize((address account, uint256 roleBitmap)[] grants)",
+  "function makeCommitment(string label, address owner, bytes32 secret, address subregistry, address resolver, uint64 duration, bytes32 referrer) pure returns (bytes32)",
+  "function commit(bytes32 commitment)",
+  "function register(string label, address owner, bytes32 secret, address subregistry, address resolver, uint64 duration, address paymentToken, bytes32 referrer) returns (uint256)",
+  "function getRegisterPrice(string label, uint64 duration, address paymentToken) view returns (uint256, uint256)",
+  "function isAvailable(string label) view returns (bool)",
+  "function MIN_COMMITMENT_AGE() view returns (uint64)",
+  "function mint(address to, uint256 amount)",
+  "function approve(address spender, uint256 value) returns (bool)",
+  "function setParent(address parent, string label)",
+  "function setSubregistry(uint256 anyId, address registry)"
+]);
+var registryRegisterAbi = parseAbi2([
+  "function register(string label, address owner, address registry, address resolver, uint256 roleBitmap, uint64 expiry) returns (uint256)"
+]);
+var resolverInitAbi = parseAbi2([
+  "function initialize((address account, uint256 roleBitmap)[] grants, bytes[] calls)"
+]);
+var permissionedResolverAbi = parseAbi2([
+  "function setText(bytes name, string key, string value)",
+  "function grantSetterRoles(bytes setter, address account) returns (bool)",
+  "error EACUnauthorizedAccountRoles(uint256 resource, uint256 roleBitmap, address account)"
+]);
+function dnsEncodeName(name) {
+  const parts = name.split(".").flatMap((label) => {
+    const bytes = new TextEncoder().encode(label);
+    if (bytes.length === 0 || bytes.length > 63)
+      throw new Error(`Invalid label in ${name}`);
+    return [bytes.length, ...bytes];
+  });
+  return toHex2(new Uint8Array([...parts, 0]));
 }
-var resolverAbi = parseAbi(["function text(bytes32 node, string key) view returns (string)"]);
+var resolveAbi = parseAbi2([
+  "function resolve(bytes name, bytes data) view returns (bytes)",
+  "function text(bytes32 node, string key) view returns (string)"
+]);
+function textLookupArgs(name, key) {
+  return [
+    dnsEncodeName(name),
+    encodeFunctionData2({ abi: resolveAbi, functionName: "text", args: [namehash(name), key] })
+  ];
+}
+function decodeTextLookup(result) {
+  return decodeFunctionResult2({ abi: resolveAbi, functionName: "text", data: result });
+}
 var verifierSetAbi = parseAbi(["function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)"]);
 var stateViewAbi = parseAbi([
   "function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)"
@@ -24304,10 +26075,9 @@ function attestDecision(runtime2, decisionId) {
     return "nothing to attest";
   }
   const client = evmClient(config);
-  const node = agentNode(proof.action.agentName);
   const records = Object.fromEntries(Object.entries(RECORD_KEYS).map(([field, key]) => [
     field,
-    read2(runtime2, client, config.resolver, resolverAbi, "text", [node, key])
+    decodeTextLookup(read2(runtime2, client, config.resolver, resolveAbi, "resolve", textLookupArgs(proof.action.agentName, key)))
   ]));
   const limits = parseLimits(records);
   const quorum = read2(runtime2, client, config.verifierSet, verifierSetAbi, "hasQuorum", [proof.digest, proof.signatures]);

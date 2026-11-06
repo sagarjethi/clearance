@@ -7,3 +7,4 @@ export * from "./eip712";
 export * from "./human";
 export * from "./limits";
 export * from "./tokens";
+export * from "./ensv2";

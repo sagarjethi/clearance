@@ -1,6 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
+import type { Deployment, RawRecords } from "@clearance/shared";
 import { bytesToHex, type Hex } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 
@@ -33,9 +34,9 @@ export async function freePort(): Promise<number> {
   });
 }
 
-async function waitForRpc(url: string, child: ChildProcess) {
-  for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) throw new Error("anvil exited early");
+async function waitForRpc(url: string, child: ChildProcess, errors: () => string) {
+  for (let i = 0; i < 600; i++) {
+    if (child.exitCode !== null) throw new Error(`anvil exited early: ${errors()}`);
     try {
       const response = await fetch(url, {
         method: "POST",
@@ -52,15 +53,44 @@ async function waitForRpc(url: string, child: ChildProcess) {
 }
 
 /** Starts a throwaway anvil on its own port. Stop it with the returned child's PID, never by name. */
-export async function startAnvil(port: number): Promise<{ child: ChildProcess; rpcUrl: string }> {
-  const child = spawn("anvil", ["--port", String(port), "--silent", "--host", "127.0.0.1"], { stdio: "ignore" });
+export async function startAnvil(port: number, forkUrl?: string): Promise<{ child: ChildProcess; rpcUrl: string }> {
+  const fork = forkUrl ? ["--fork-url", forkUrl] : [];
+  const child = spawn("anvil", ["--port", String(port), "--silent", "--host", "127.0.0.1", ...fork], { stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  child.stderr?.on("data", (d) => {
+    stderr += d;
+  });
   const rpcUrl = `http://127.0.0.1:${port}`;
-  await waitForRpc(rpcUrl, child);
+  await waitForRpc(rpcUrl, child, () => stderr.slice(-500));
   return { child, rpcUrl };
 }
 
+/** v4 as deployed on Sepolia. Passing these makes a deploy use the real contracts rather than fresh ones. */
+export const V4_SEPOLIA = {
+  POOL_MANAGER: "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
+  QUOTER: "0x68aFa8b853cAa7a2D40B0F6AEE5C4DbC147C8244",
+  STATE_VIEW: "0xe1dd9c3fa50edb962e442f60dfbc432e24537e4c",
+};
+
+/** A resolver address is needed to deploy, and the real one needs the deployed account. This fills the gap. */
+export const RESOLVER_SET_LATER = "0x0000000000000000000000000000000000000001";
+
+export function agentRecords(d: Pick<Deployment, "account" | "usdc" | "weth" | "moon" | "treasury">, ownerSub: string): RawRecords {
+  return {
+    account: d.account,
+    maxSizeUsd: "1000",
+    humanCapUsd: "25000",
+    maxImpactBps: "300",
+    requiredVerifiers: "2",
+    allowedTokens: [d.usdc, d.weth, d.moon].join(","),
+    maxPaymentUsd: "1",
+    allowedPayees: d.treasury,
+    ownerSub,
+  };
+}
+
 /** Deploys to the given chain. Only ever call this with a throwaway local RPC. */
-export function deployLocal(rpcUrl: string, deploymentFile: string) {
+export function deployLocal(rpcUrl: string, deploymentFile: string, extraEnv: Record<string, string> = {}) {
   if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(rpcUrl)) throw new Error(`Refusing a local deploy to ${rpcUrl}`);
   execFileSync("forge", ["script", "script/Deploy.s.sol:Deploy", "--rpc-url", rpcUrl, "--broadcast", "--slow", "--silent"], {
     cwd: resolve(ROOT, "contracts"),
@@ -73,6 +103,7 @@ export function deployLocal(rpcUrl: string, deploymentFile: string) {
       TREASURY_ADDRESS: testAddress(ACCOUNTS.treasury),
       ATTEST_FORWARDER: testAddress(ACCOUNTS.attestor),
       DEPLOYMENT_FILE: deploymentFile,
+      ...extraEnv,
     },
   });
 }

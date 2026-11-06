@@ -209,6 +209,14 @@ export class Store {
       .run(checkpoint.id, checkpoint.state, JSON.stringify(checkpoint));
   }
 
+  /** The newest checkpoint for this exact action that the owner hasn't answered. */
+  pendingCheckpointFor(actionHash: string): Checkpoint | undefined {
+    const rows = this.db
+      .prepare("SELECT data FROM checkpoints WHERE json_extract(data, '$.actionHash') = ? AND json_extract(data, '$.status') = 'pending' ORDER BY rowid DESC LIMIT 1")
+      .all(actionHash) as unknown as { data: string }[];
+    return rows[0] ? (JSON.parse(rows[0].data) as Checkpoint) : undefined;
+  }
+
   checkpoint(id: string): Checkpoint | undefined {
     const row = this.db.prepare("SELECT data FROM checkpoints WHERE id = ?").get(id) as { data: string } | undefined;
     return row ? JSON.parse(row.data) : undefined;

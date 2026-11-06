@@ -3,6 +3,7 @@ import {
   agentNode,
   erc20Abi,
   parseLimits,
+  readAgentRecords,
   paymentActionSchema,
   resolverAbi,
   swapActionSchema,
@@ -11,7 +12,6 @@ import {
   type Deployment,
   type HumanProof,
   type Limits,
-  type RawRecords,
 } from "@clearance/shared";
 import { createHash, randomBytes } from "node:crypto";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -90,20 +90,9 @@ export function apiApp(config: ApiConfig) {
     return event;
   };
 
-  async function readRecords(name: string): Promise<RawRecords> {
-    const node = agentNode(name);
-    const entries = await Promise.all(
-      Object.entries(RECORD_KEYS).map(async ([field, key]) => [
-        field,
-        await client.readContract({ address: deployment.resolver, abi: resolverAbi, functionName: "text", args: [node, key] }),
-      ]),
-    );
-    return Object.fromEntries(entries);
-  }
-
   async function readLimits(name: string): Promise<Limits | undefined> {
     try {
-      return parseLimits(await readRecords(name));
+      return parseLimits(await readAgentRecords(client, deployment.resolver, name));
     } catch {
       return undefined;
     }
@@ -222,11 +211,12 @@ export function apiApp(config: ApiConfig) {
     const decision = await coordinator.decide(action, proof);
     c.set("decision", decision);
 
-    if (decision.verdict === "HUMAN_REQUIRED" && human) {
-      const fresh = human.create(action);
-      const checkpoint = { id: fresh.id, url: `${config.publicUrl}/v1/human/${fresh.id}/start` };
+    // A retry that brought a checkpoint already had its answer, so the owner isn't asked again.
+    if (decision.verdict === "HUMAN_REQUIRED" && human && !checkpointId) {
+      const open = human.findOrCreate(action);
+      const checkpoint = { id: open.id, url: `${config.publicUrl}/v1/human/${open.id}/start` };
       record(decision, checkpoint);
-      publish("checkpoint", { id: fresh.id, status: "pending", decisionId: decision.id, action });
+      publish("checkpoint", { id: open.id, status: "pending", decisionId: decision.id, action });
       return c.json({ ...decision, checkpoint });
     }
     record(decision);
