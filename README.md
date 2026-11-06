@@ -40,8 +40,8 @@ A hook only guards its own pool, so the smart account is the real enforcer. The 
 
 | What | Where |
 |---|---|
-| The check on every swap | [`beforeSwap`](contracts/src/ClearanceHook.sol#L129), [`_enforce`](contracts/src/ClearanceHook.sol#L140) |
-| Who really called, through `IMsgSender` | [`ClearanceHook.sol:147`](contracts/src/ClearanceHook.sol#L147), [`ClearanceRouter.msgSender`](contracts/src/ClearanceRouter.sol#L34) |
+| The check on every swap | [`beforeSwap`](contracts/src/ClearanceHook.sol#L136), [`_enforce`](contracts/src/ClearanceHook.sol#L148) |
+| Who really called, through `IMsgSender` | [`ClearanceHook.sol:156`](contracts/src/ClearanceHook.sol#L156), [`ClearanceRouter.msgSender`](contracts/src/ClearanceRouter.sol#L32) |
 | Only allowed hooks, and no direct transfers | [`ClearanceAccount.swapCleared`](contracts/src/ClearanceAccount.sol#L78) |
 | The Quoter as live market data | [`apps/verifier/src/facts.ts`](apps/verifier/src/facts.ts) |
 | Friction we hit | [`FEEDBACK.md`](FEEDBACK.md) |
@@ -50,9 +50,9 @@ A hook only guards its own pool, so the smart account is the real enforcer. The 
 
 | What | Where |
 |---|---|
-| Name, per-agent resolver and limits | [`setupAgentName`](packages/shared/src/ensv2.ts) |
-| Reading limits through ENSIP-10 | [`readAgentRecords`](packages/shared/src/ensv2.ts) |
-| A writer limited to one record | [`grantRecordWriter`](packages/shared/src/ensv2.ts) |
+| Name, per-agent resolver and limits | [`setupAgentName`](packages/shared/src/ensv2.ts#L135) |
+| Reading limits through ENSIP-10 | [`readAgentRecords`](packages/shared/src/ensv2.ts#L100) |
+| A writer limited to one record | [`grantRecordWriter`](packages/shared/src/ensv2.ts#L233) |
 | Each name bound to one wallet | [`clearance.account`](packages/shared/src/limits.ts) |
 | Tests on the real contracts | [`tests/ens-fork.test.ts`](tests/ens-fork.test.ts) |
 
@@ -61,7 +61,7 @@ A hook only guards its own pool, so the smart account is the real enforcer. The 
 | What | Where |
 |---|---|
 | Step-up with `max_age=0` and `prompt=login`, and backend validation | [`apps/api/src/human.ts`](apps/api/src/human.ts) |
-| Checks on `state`, `nonce`, `acr`, `auth_time` and the owner | [`checkHumanApproval`](packages/shared/src/human.ts) |
+| Checks on `state`, `nonce`, `acr`, `auth_time` and the owner | [`checkHumanApproval`](packages/shared/src/human.ts#L38) |
 | The denied path | [`human-denied` scenario](apps/agent/src/scenarios.ts) |
 | Integration debrief | [`docs/WORLD_DEBRIEF.md`](docs/WORLD_DEBRIEF.md) |
 
@@ -69,17 +69,17 @@ A hook only guards its own pool, so the smart account is the real enforcer. The 
 
 | What | Where |
 |---|---|
-| The workflow | [`cre/attest/attest.ts`](cre/attest/attest.ts) |
-| Its checks | [`evaluateAttestation`](packages/shared/src/attestation.ts) |
+| The workflow | [`attestDecision`](cre/attest/attest.ts#L92) |
+| Its checks | [`evaluateAttestation`](packages/shared/src/attestation.ts#L62) |
 | Where its reports land | [`ClearanceLedger.onReport`](contracts/src/ClearanceLedger.sol) |
-| Where its reports get enforced | [`ClearanceHook.sol`, `NotAttested`](contracts/src/ClearanceHook.sol) |
+| Where its reports get enforced | [`NotAttested`](contracts/src/ClearanceHook.sol#L177) |
 
 ### x402
 
 | What | Where |
 |---|---|
 | Charging for a check | [`apps/api/src/x402.ts`](apps/api/src/x402.ts) |
-| A smart account paying, with verifiers inside the signature | [`Agent.paymentSigner`](apps/agent/src/agent.ts), [`isValidSignature`](contracts/src/ClearanceAccount.sol) |
+| A smart account paying, with verifiers inside the signature | [`Agent.paymentSigner`](apps/agent/src/agent.ts), [`isValidSignature`](contracts/src/ClearanceAccount.sol#L99) |
 
 ## Tests
 
