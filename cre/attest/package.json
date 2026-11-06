@@ -1,0 +1,19 @@
+{
+  "name": "clearance-attest-workflow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "bunx cre-setup",
+    "compile": "bunx cre-compile main.ts attest.wasm",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@chainlink/cre-sdk": "1.23.0",
+    "viem": "^2.21.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/node": "24"
+  }
+}

@@ -298,6 +298,16 @@ export function apiApp(config: ApiConfig) {
     return c.json({ ...result, verdict: result.hazards.length ? "RISKY" : "NO_ADMIN_FUNCTIONS_FOUND" });
   });
 
+  app.get("/v1/attestations/pending", rateLimit, (c) => {
+    const now = Math.floor(Date.now() / 1000);
+    const pending = store
+      .recentDecisions<Decision & { attestation?: AttestationOutcome }>(200)
+      .filter((d) => d.attestationRequired && !d.attestation && (d.clearance?.expiry ?? 0) > now)
+      .map((d) => d.id)
+      .reverse();
+    return c.json({ ids: pending });
+  });
+
   app.get("/v1/track-record", (c) => {
     const decisions = store.recentDecisions<Decision & { attestation?: AttestationOutcome }>(500);
     const agreement = new Map<string, { evaluated: number; dissented: number }>();
