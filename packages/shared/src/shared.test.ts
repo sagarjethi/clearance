@@ -4,6 +4,9 @@ import { LimitsError, parseLimits, type RawRecords } from "./limits";
 import { sortBySigner } from "./eip712";
 
 const raw: RawRecords = {
+  account: "0x0000000000000000000000000000000000000009",
+  allowedPools: "",
+  dailyPaymentUsd: "5",
   maxSizeUsd: "1000",
   humanCapUsd: "25000",
   maxImpactBps: "300",
@@ -35,6 +38,12 @@ describe("parseLimits fails closed", () => {
   });
   it("rejects zero required verifiers", () => {
     expect(() => parseLimits({ ...raw, requiredVerifiers: "0" })).toThrow(LimitsError);
+  });
+  it("rejects a missing account binding", () => {
+    expect(() => parseLimits({ ...raw, account: "" })).toThrow(LimitsError);
+  });
+  it("rejects a bad pool id", () => {
+    expect(() => parseLimits({ ...raw, allowedPools: "0x1234" })).toThrow(LimitsError);
   });
   it("rejects a bad address", () => {
     expect(() => parseLimits({ ...raw, allowedTokens: "0xnope" })).toThrow(LimitsError);

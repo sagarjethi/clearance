@@ -1,0 +1,13 @@
+{
+  "name": "@clearance/site",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "dependencies": {
+    "@fontsource/barlow": "^5.1.0",
+    "@fontsource/barlow-condensed": "^5.1.0",
+    "@fontsource/ibm-plex-mono": "^5.1.0"
+  },
+  "devDependencies": { "vite": "^6.0.0" }
+}

@@ -56,6 +56,13 @@ export class HumanGate {
     return checkpoint;
   }
 
+  /** One open question per action: asking again returns the question already waiting for the owner. */
+  findOrCreate(action: Action): Checkpoint {
+    const existing = this.store.pendingCheckpointFor(actionHash(action));
+    if (existing && this.read(existing.id)?.status === "pending") return existing;
+    return this.create(action);
+  }
+
   /** Reads a checkpoint, expiring it if the owner took too long. */
   read(id: string): Checkpoint | undefined {
     const checkpoint = this.store.checkpoint(id);

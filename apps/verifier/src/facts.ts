@@ -1,48 +1,19 @@
 import {
-  RECORD_KEYS,
-  agentNode,
+  accountAbi,
   parseLimits,
+  readAgentRecords,
   poolId,
   quoterAbi,
-  resolverAbi,
+  scanToken,
   stateViewAbi,
   erc20Abi,
   type Limits,
   type PoolKey,
-  type RawRecords,
 } from "@clearance/shared";
-import { getAddress, toFunctionSelector, type Address, type Hex, type PublicClient } from "viem";
+import { getAddress, type Address, type PublicClient } from "viem";
 import type { Sourced, TokenFacts } from "./rules";
 
 const Q96 = 2n ** 96n;
-const EIP1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
-
-const HAZARD_SIGNATURES = [
-  "blacklist(address)",
-  "addBlackList(address)",
-  "setBlacklist(address,bool)",
-  "mint(address,uint256)",
-  "pause()",
-  "setFee(uint256)",
-  "setTax(uint256)",
-] as const;
-
-const HAZARDS = HAZARD_SIGNATURES.map((signature) => ({
-  signature,
-  selector: toFunctionSelector(`function ${signature}`).slice(2),
-}));
-
-/** Finds admin-function selectors pushed in runtime code. A real PUSH4 prefix (0x63) avoids most false hits. */
-export function scanHazards(code: Hex): string[] {
-  const body = code.toLowerCase().slice(2);
-  return HAZARDS.filter(({ selector }) => {
-    for (let i = body.indexOf(`63${selector}`); i !== -1; i = body.indexOf(`63${selector}`, i + 1)) {
-      if (i % 2 === 0) return true;
-    }
-    return false;
-  }).map((h) => h.signature);
-}
-
 function now(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -56,32 +27,11 @@ async function sourced<T>(source: string, read: () => Promise<T>): Promise<Sourc
 }
 
 export function readLimits(client: PublicClient, resolver: Address, name: string): Promise<Sourced<Limits>> {
-  return sourced("ens", async () => {
-    const node = agentNode(name);
-    const entries = await Promise.all(
-      Object.entries(RECORD_KEYS).map(async ([field, key]) => {
-        const value = await client.readContract({ address: resolver, abi: resolverAbi, functionName: "text", args: [node, key] });
-        return [field, value] as const;
-      }),
-    );
-    return parseLimits(Object.fromEntries(entries) as RawRecords);
-  });
+  return sourced("ens", async () => parseLimits(await readAgentRecords(client, resolver, name)));
 }
 
 export function readToken(client: PublicClient, address: Address): Promise<Sourced<TokenFacts>> {
-  return sourced("bytecode", async () => {
-    const code = await client.getCode({ address });
-    if (!code || code === "0x") throw new Error("no contract at this address");
-    let hazards = scanHazards(code);
-    // Proxies keep their functions in the implementation, so scan that too.
-    const slot = await client.getStorageAt({ address, slot: EIP1967_IMPLEMENTATION_SLOT });
-    if (slot && BigInt(slot) !== 0n) {
-      const implementation = getAddress(`0x${slot.slice(-40)}`);
-      const implementationCode = await client.getCode({ address: implementation });
-      if (implementationCode) hazards = [...new Set([...hazards, ...scanHazards(implementationCode)])];
-    }
-    return { address, hazards };
-  });
+  return sourced("bytecode", () => scanToken(client, address));
 }
 
 export async function quoteOut(
@@ -119,6 +69,12 @@ function impactBps(amountIn: bigint, amountOut: bigint, spot: { num: bigint; den
   if (ideal === 0n) throw new Error("trade is too small to price");
   if (amountOut >= ideal) return 0;
   return Number(((ideal - amountOut) * 10_000n) / ideal);
+}
+
+export function readRemainingSpend(client: PublicClient, account: Address, token: Address): Promise<Sourced<bigint>> {
+  return sourced("wallet", () =>
+    client.readContract({ address: account, abi: accountAbi, functionName: "spendRemaining", args: [token] }),
+  );
 }
 
 export type MarketFacts = {

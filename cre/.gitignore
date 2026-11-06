@@ -1,0 +1,4 @@
+node_modules/
+*.wasm
+attest/config.json
+.env

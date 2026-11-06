@@ -1,5 +1,6 @@
 import {
   encodeHookData,
+  hookAbi,
   actionHash,
   inputsHash,
   poolId,
@@ -30,6 +31,7 @@ export type Decision = {
     poolId: Hex;
     zeroForOne: boolean;
     maxAmountIn: string;
+    minAmountOut: string;
     expiry: number;
     chainId: number;
     nonce: string;
@@ -39,6 +41,8 @@ export type Decision = {
   verifierSignatures?: SignedBy[];
   hookData?: Hex;
   decidedAt: number;
+  digest?: Hex;
+  attestationRequired?: boolean;
 };
 
 const CLEARANCE_SECONDS = 90;
@@ -48,6 +52,7 @@ export type CoordinatorConfig = {
   client: PublicClient;
   chainId: number;
   verifierSet: Address;
+  hook: Address;
   readLimits: (name: string) => Promise<Limits | undefined>;
   timeoutMs?: number;
 };
@@ -133,12 +138,18 @@ export class Coordinator {
     const nonce = BigInt(`0x${randomBytes(31).toString("hex")}`);
     const hash = inputsHash(action, limits);
     const signers = signing.filter((e) => BigInt(e.maxAmount) >= maxAmountIn);
+    // The highest floor any signer asked for, scaled to the cleared size, satisfies them all.
+    const minAmountOut = signers.reduce((highest, e) => {
+      const floor = (BigInt(e.minAmountOut) * maxAmountIn) / BigInt(e.maxAmount);
+      return floor > highest ? floor : highest;
+    }, 0n);
     const signed = await this.collect(
       signers.map((e) => urlByVerifier.get(e.verifier)!),
       {
         kind: "swap",
         action,
         maxAmountIn: maxAmountIn.toString(),
+        minAmountOut: minAmountOut.toString(),
         expiry,
         nonce: nonce.toString(),
         inputsHash: hash,
@@ -152,20 +163,28 @@ export class Coordinator {
       poolId: poolId(action.pool),
       zeroForOne: action.zeroForOne,
       maxAmountIn,
+      minAmountOut,
       expiry: BigInt(expiry),
       chainId: BigInt(this.config.chainId),
       nonce,
       inputsHash: hash,
     };
     const signatures = sortBySigner(signed);
+    const [digest, attestAbove] = await Promise.all([
+      this.config.client.readContract({ address: this.config.hook, abi: hookAbi, functionName: "clearanceDigest", args: [clearance] }),
+      this.config.client.readContract({ address: this.config.hook, abi: hookAbi, functionName: "attestAbove", args: [clearance.poolId] }),
+    ]);
     return {
       ...base,
       verdict,
+      digest,
+      attestationRequired: attestAbove !== 0n && maxAmountIn > attestAbove,
       clearance: {
         agent: action.account,
         poolId: clearance.poolId,
         zeroForOne: action.zeroForOne,
         maxAmountIn: maxAmountIn.toString(),
+        minAmountOut: minAmountOut.toString(),
         expiry,
         chainId: this.config.chainId,
         nonce: nonce.toString(),

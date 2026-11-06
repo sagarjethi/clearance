@@ -1,7 +1,7 @@
 import type { Limits } from "@clearance/shared";
 import { describe, expect, it } from "vitest";
 import { getAddress, type Address } from "viem";
-import { scanHazards } from "./facts";
+import { scanHazards } from "@clearance/shared";
 import { applyReview } from "./review";
 import { evaluatePayment, evaluateSwap, type PaymentFacts, type Sourced, type SwapFacts } from "./rules";
 
@@ -12,7 +12,12 @@ const HOOK = a(9);
 const PAYEE = a(7);
 const NOW = 1_800_000_000;
 
+const ACCOUNT = a(5);
+const POOL = `0x${"ab".repeat(32)}` as const;
 const limits: Limits = {
+  account: ACCOUNT,
+  allowedPools: [POOL],
+  dailyPaymentUsd: 5,
   maxSizeUsd: 1000,
   humanCapUsd: 25000,
   maxImpactBps: 300,
@@ -27,6 +32,9 @@ const ok = <T>(value: T, fetchedAt = NOW): Sourced<T> => ({ value, source: "test
 
 function swapFacts(overrides: Partial<SwapFacts> = {}): SwapFacts {
   return {
+    account: ACCOUNT,
+    poolId: POOL,
+    remainingSpend: ok(10n ** 30n),
     limits: ok(limits),
     allowedHook: HOOK,
     poolHook: HOOK,
@@ -52,7 +60,7 @@ describe("swap rules", () => {
     expect(r.maxAmount).toBe("100000000");
   });
 
-  it.each(["limits", "tokenIn", "tokenOut", "sizeUsd", "impactBps", "safeAmountIn", "usdPerRawIn"] as const)(
+  it.each(["limits", "tokenIn", "tokenOut", "sizeUsd", "impactBps", "safeAmountIn", "usdPerRawIn", "remainingSpend"] as const)(
     "blocks when %s can't be read",
     (field) => {
       const r = evaluateSwap(swapFacts({ [field]: { error: "rpc down", source: "test" } }), NOW);
@@ -87,8 +95,28 @@ describe("swap rules", () => {
     expect(r.verdict).toBe("ALLOW");
   });
 
+  it("blocks a pool the owner hasn't approved, whatever its price says", () => {
+    const r = evaluateSwap(swapFacts({ poolId: `0x${"cd".repeat(32)}`, impactBps: ok(0) }), NOW);
+    expect(codes(r)).toEqual(["pool_not_allowed"]);
+  });
+
+  it("blocks when the wallet's daily cap is used up", () => {
+    expect(codes(evaluateSwap(swapFacts({ remainingSpend: ok(0n) }), NOW))).toEqual(["spend_cap_reached"]);
+  });
+
+  it("reduces to what fits under the daily cap", () => {
+    const r = evaluateSwap(swapFacts({ remainingSpend: ok(40_000000n) }), NOW);
+    expect(r.verdict).toBe("REDUCE");
+    expect(r.maxAmount).toBe("40000000");
+    expect(codes(r)).toContain("spend_cap_reduced");
+  });
+
   it("blocks a pool without the clearance hook", () => {
     expect(codes(evaluateSwap(swapFacts({ poolHook: a(0) }), NOW))).toEqual(["pool_not_guarded"]);
+  });
+
+  it("blocks a wallet the name's record doesn't bind", () => {
+    expect(codes(evaluateSwap(swapFacts({ account: a(6) }), NOW))).toEqual(["account_not_bound"]);
   });
 
   it("blocks a zero amount", () => {
@@ -141,11 +169,13 @@ describe("swap rules", () => {
 
 describe("payment rules", () => {
   const facts = (overrides: Partial<PaymentFacts> = {}): PaymentFacts => ({
+    account: ACCOUNT,
     limits: ok(limits),
     payee: PAYEE,
     token: USDC,
     stableTokens: [USDC],
     valueUsd: 0.5,
+    paidTodayUsd: 0,
     validBefore: BigInt(NOW + 60),
     now: NOW,
     ...overrides,
@@ -154,11 +184,17 @@ describe("payment rules", () => {
   it("allows a listed payee within the limit", () => {
     expect(evaluatePayment(facts(), 500000n).verdict).toBe("ALLOW");
   });
+  it("blocks a wallet the name's record doesn't bind", () => {
+    expect(codes(evaluatePayment(facts({ account: a(6) }), 1n))).toEqual(["account_not_bound"]);
+  });
   it("blocks an unlisted payee", () => {
     expect(codes(evaluatePayment(facts({ payee: a(8) }), 1n))).toEqual(["payee_not_allowed"]);
   });
   it("blocks above the payment limit", () => {
     expect(codes(evaluatePayment(facts({ valueUsd: 1.01 }), 1n))).toEqual(["payment_above_limit"]);
+  });
+  it("blocks past the daily payment limit", () => {
+    expect(codes(evaluatePayment(facts({ paidTodayUsd: 4.8 }), 1n))).toEqual(["daily_payment_limit"]);
   });
   it("blocks a token that isn't a stablecoin", () => {
     expect(codes(evaluatePayment(facts({ token: WETH }), 1n))).toEqual(["payment_token_not_allowed"]);

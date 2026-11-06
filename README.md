@@ -1,0 +1,155 @@
+# Clearance
+
+A check AI agents can't skip.
+
+Agents hold real money, and a hijacked one will happily spend it.
+Other tools tell an agent what looks risky, then let it decide.
+Clearance takes that decision away.
+Independent verifiers check the exact action against live data, and without enough signatures the pool refuses the swap and the wallet refuses the payment.
+
+## Run it
+
+You need Foundry, Node 22 or newer, pnpm and Bun.
+Nothing here needs real funds or keys.
+
+```bash
+git clone --recursive <repo> clearance
+cd clearance
+pnpm install
+pnpm start
+```
+
+- Website: http://localhost:5184
+- Dashboard: http://localhost:5183
+- Try every attack from the dashboard's attack lab, or with `pnpm demo`.
+
+## How it works
+
+1. **The owner sets limits** in the agent's ENS records: size, price impact, tokens, payees.
+2. **The agent asks** `POST /v1/clear/swap` with the exact swap, and pays with x402 or an API key.
+3. **Verifiers check separately.** Each reads the chain itself. Fixed rules decide, and missing or stale data always blocks. A model can explain or veto, and can never approve.
+4. **A quorum signs** one EIP-712 clearance bound to the agent, pool, direction, amount, expiry and nonce. A refusal is simply no signature, and a reduction is a smaller `maxAmountIn`.
+5. **Big trades get a human and a second look.** Over the limit, the owner approves with World ID, bound to that one action. A Chainlink CRE workflow then re-derives limits, quorum and market, and writes its finding on chain.
+6. **The chain enforces.** The v4 hook reverts anything without a valid clearance. The agent's smart account refuses other pools, direct transfers and uncleared payments.
+
+A hook only guards its own pool, so the smart account is the real enforcer. The hook is an opt-in safe pool.
+
+The wallet also enforces what no server can talk it out of: a signed minimum output, a rolling daily spend cap per token, and the owner's own signature count.
+Only an approved creator can open a pool on the hook, and the owner lists the pools it trusts in ENS, because a pool's own price means nothing otherwise.
+
+## Where to look
+
+### Uniswap v4
+
+| What | Where |
+|---|---|
+| The check on every swap | [`beforeSwap`](contracts/src/ClearanceHook.sol#L149), [`_enforce`](contracts/src/ClearanceHook.sol#L161) |
+| Who really called, through `IMsgSender` | [`ClearanceHook.sol:169`](contracts/src/ClearanceHook.sol#L169), [`ClearanceRouter.msgSender`](contracts/src/ClearanceRouter.sol#L32) |
+| Only allowed hooks, no direct transfers, spend cap and signed output | [`ClearanceAccount.swapCleared`](contracts/src/ClearanceAccount.sol#L111) |
+| Only approved creators can open a pool | [`beforeInitialize`](contracts/src/ClearanceHook.sol#L196) |
+| The Quoter as live market data | [`apps/verifier/src/facts.ts`](apps/verifier/src/facts.ts) |
+| Friction we hit | [`FEEDBACK.md`](FEEDBACK.md) |
+
+### ENSv2
+
+| What | Where |
+|---|---|
+| Name, per-agent resolver and limits | [`setupAgentName`](packages/shared/src/ensv2.ts#L135) |
+| Reading limits through ENSIP-10 | [`readAgentRecords`](packages/shared/src/ensv2.ts#L100) |
+| A writer limited to one record | [`grantRecordWriter`](packages/shared/src/ensv2.ts#L233) |
+| Each name bound to one wallet | [`clearance.account`](packages/shared/src/limits.ts) |
+| Tests on the real contracts | [`tests/ens-fork.test.ts`](tests/ens-fork.test.ts) |
+
+### World ID
+
+| What | Where |
+|---|---|
+| Step-up with `max_age=0` and `prompt=login`, and backend validation | [`apps/api/src/human.ts`](apps/api/src/human.ts) |
+| Checks on `state`, `nonce`, `acr`, `auth_time` and the owner | [`checkHumanApproval`](packages/shared/src/human.ts#L38) |
+| The denied path | [`human-denied` scenario](apps/agent/src/scenarios.ts) |
+| Integration debrief | [`docs/WORLD_DEBRIEF.md`](docs/WORLD_DEBRIEF.md) |
+
+### Chainlink CRE
+
+| What | Where |
+|---|---|
+| The workflow | [`attestDecision`](cre/attest/attest.ts#L96) |
+| Its checks | [`evaluateAttestation`](packages/shared/src/attestation.ts#L66) |
+| Where its reports land | [`ClearanceLedger.onReport`](contracts/src/ClearanceLedger.sol) |
+| Where its reports get enforced | [`NotAttested`](contracts/src/ClearanceHook.sol#L190) |
+
+### x402
+
+| What | Where |
+|---|---|
+| Charging for a check | [`apps/api/src/x402.ts`](apps/api/src/x402.ts) |
+| A smart account paying, with verifiers inside the signature | [`Agent.paymentSigner`](apps/agent/src/agent.ts), [`isValidSignature`](contracts/src/ClearanceAccount.sol#L154) |
+
+## Tests
+
+```bash
+pnpm test:contracts
+pnpm test:ts
+pnpm test:cre
+pnpm test:fork
+```
+
+`pnpm test:fork` runs every attack against the real Sepolia PoolManager, Quoter and StateView, with limits on a real ENSv2 name, on a throwaway fork.
+All tests use throwaway chains and temporary databases.
+
+## Status
+
+What's proven, and what isn't:
+
+| Part | Status |
+|---|---|
+| Hook, account, verifiers, API, scenarios | Tested end to end on a local chain |
+| Real v4, ENSv2 and Circle USDC | Every scenario passes on a Sepolia fork, including the smart account's ERC-1271 payment through x402. Not yet deployed to Sepolia |
+| CRE workflow | Compiles to WASM and passes on the SDK's mock runtime. `cre workflow simulate` needs a logged-in account and hasn't run yet |
+| World ID | Runs against a local test issuer that proves nobody's humanity. Not yet run against World's sandbox |
+| Model review | Adapters tested against stub servers. Not yet run with real provider keys |
+| x402 on Launa | Unproven with a smart account on real Sepolia. The fork runs use the npm reference facilitator |
+
+An independent review found a critical bug, now fixed and tested: anyone could open a pool on the hook at an absurd price, and verifiers would have trusted it.
+
+Known limits:
+
+- **Attestations through a mock forwarder are not trustworthy.** `cre workflow simulate --broadcast` delivers through CRE's mock forwarder, which anyone may be able to call. For real use, deploy the workflow, point the ledger at the real forwarder and set `ATTEST_WORKFLOW_ID`.
+- **Payment budgets and used approvals live in verifier memory.** A restart forgets them. The swap spend cap is on chain and doesn't have this limit. A durable store comes next.
+- **USD values come from the owner-approved pool's own price**, so owner approval of a pool is a trust decision. An independent price oracle is the next step for mainnet.
+- **Hook attestation thresholds are in raw input units**, so selling tWETH nearly always needs an attestation. This fails closed.
+- **One agent per deployment.** The verifiers read one resolver, so more agents need their own deployment for now.
+- **The dashboard's admin token** is held by its dev server, which binds to localhost. A hosted version needs real owner sign-in first.
+- **GoPlus and CoinGecko aren't used**, because they have no data for Sepolia test tokens. The bytecode rule and Quoter do this job on testnet.
+- **The contracts haven't had an external audit.** Don't put real funds behind them.
+
+## Deploy to Sepolia
+
+Fill in `.env` from `.env.example`, then:
+
+```bash
+set -a; source .env; set +a
+pnpm deploy:sepolia
+```
+
+To run the CRE workflow, log in with `cre login`, copy `cre/attest/config.example.json` to `config.json`, fill in the addresses, then:
+
+```bash
+cd cre
+cre workflow simulate ./attest --target local-simulation --non-interactive --trigger-index 0 --http-payload '{"decisionId":"<id>"}' --broadcast
+```
+
+## Layout
+
+```text
+contracts/        Hook, router, smart account, verifier set, ledger, Foundry tests
+packages/shared/  EIP-712, canonical hashing, limits, ENSv2, human approval check
+apps/verifier/    Facts, rules, model review, signing
+apps/api/         Clearing, quorum, World gate, x402, keys, proofs
+apps/agent/       Agent, attack scenarios, runner
+apps/mcp/         MCP server, so any agent can call Clearance as a tool
+apps/web/         Owner dashboard
+apps/site/        Website and docs
+apps/mock-world/  Local test issuer for the World flow
+cre/attest/       Chainlink CRE workflow
+```

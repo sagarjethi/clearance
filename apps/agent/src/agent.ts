@@ -31,9 +31,10 @@ export type DecisionResponse = {
   requested: string;
   required: number;
   hookData?: Hex;
-  clearance?: { maxAmountIn: string; expiry: number; nonce: string };
+  clearance?: { maxAmountIn: string; minAmountOut: string; expiry: number; nonce: string };
+  attestationRequired?: boolean;
   verifierSignatures?: { signer: Address; signature: Hex }[];
-  evaluations: { verifier: Address; verdict: string; maxAmount: string; reasons: { code: string; detail: string }[] }[];
+  evaluations: { verifier: Address; verdict: string; maxAmount: string; minAmountOut: string; reasons: { code: string; detail: string }[] }[];
   checkpoint?: { id: string; url: string };
   error?: string;
 };
@@ -82,6 +83,7 @@ export type AgentConfig = {
   deployment: Deployment;
   agentKey: Hex;
   reportToken?: string;
+  apiKey?: string;
 };
 
 export class Agent {
@@ -133,11 +135,11 @@ export class Agent {
           },
           reason: "Pay for a clearance check",
         };
-        const decision = await this.clearPayment(action);
+        const agentSignature = await key.signTypedData(typed as never);
+        const decision = await this.clearPayment(action, agentSignature);
         if (decision.verdict !== "ALLOW" || !decision.verifierSignatures) {
           throw new PaymentRefused(decision);
         }
-        const agentSignature = await key.signTypedData(typed as never);
         return packPaymentSignature(agentSignature, decision.verifierSignatures);
       },
     };
@@ -152,20 +154,31 @@ export class Agent {
   /** Paid through x402 when the API charges for checks. */
   async clearSwap(action: SwapAction, checkpointId?: string): Promise<DecisionResponse> {
     return this.asJson(
-      await this.paidFetch(`${this.config.apiUrl}/v1/clear/swap`, {
+      await (this.config.apiKey ? fetch : this.paidFetch)(`${this.config.apiUrl}/v1/clear/swap`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
+        },
         body: JSON.stringify({ action, checkpointId }),
       }),
     );
   }
 
-  async clearPayment(action: PaymentAction): Promise<DecisionResponse> {
+  /** Asks for the independent check that large clearances need before the hook accepts them. */
+  async attest(decisionId: string): Promise<{ status: string; problems: string[]; txHash?: Hex; mode: string }> {
+    const response = await fetch(`${this.config.apiUrl}/v1/decisions/${decisionId}/attest`, { method: "POST" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(`Attestation failed: ${JSON.stringify(body)}`);
+    return body;
+  }
+
+  async clearPayment(action: PaymentAction, agentSignature: Hex): Promise<DecisionResponse> {
     return this.asJson(
       await fetch(`${this.config.apiUrl}/v1/clear/payment`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, agentSignature }),
       }),
     );
   }

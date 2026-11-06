@@ -9,3 +9,4 @@ contracts/cache/
 contracts/broadcast/
 deployments/local.json
 *.log
+deployments/test-*.json

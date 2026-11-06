@@ -1,15 +1,19 @@
-import { apiApp, HumanGate, Store, x402Paywall } from "@clearance/api";
+import { LocalAttestor, apiApp, HumanGate, Store, x402Paywall, scanTokenFor } from "@clearance/api";
 import { Agent, mockOwner, type ScenarioContext } from "@clearance/agent";
 import { mockWorldApp, TEST_ACR } from "@clearance/mock-world";
-import { WORLD_ACR, loadDeployment, type Deployment } from "@clearance/shared";
+import { WORLD_ACR, loadDeployment, setupAgentName, type Deployment } from "@clearance/shared";
 import { Verifier, verifierApp, type ReviewConfig } from "@clearance/verifier";
 import { serve, type ServerType } from "@hono/node-server";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createPublicClient, createWalletClient, http } from "viem";
+import { randomBytes } from "node:crypto";
+import { createPublicClient, createTestClient, createWalletClient, encodeAbiParameters, http, keccak256, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { ACCOUNTS, ROOT, deployLocal, freePort, startAnvil, testAddress, testKey } from "../scripts/local";
+import { ACCOUNTS, RESOLVER_SET_LATER, ROOT, V4_SEPOLIA, agentRecords, deployLocal, freePort, startAnvil, testAddress, testKey } from "../scripts/local";
+
+export const ADMIN_TOKEN = "test-admin-token";
+export const CIRCLE_USDC_SEPOLIA = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 
 export type Harness = {
   deployment: Deployment;
@@ -27,13 +31,50 @@ function listen(fetch: (r: Request) => Response | Promise<Response>, port: numbe
   });
 }
 
-export async function startHarness(options: { review?: ReviewConfig[]; deadVerifier?: boolean; x402?: boolean } = {}): Promise<Harness> {
+export async function startHarness(
+  options: { review?: ReviewConfig[]; deadVerifier?: boolean; x402?: boolean; forkUrl?: string } = {},
+): Promise<Harness> {
   const anvilPort = await freePort();
-  const { child: anvil, rpcUrl } = await startAnvil(anvilPort);
+  const { child: anvil, rpcUrl } = await startAnvil(anvilPort, options.forkUrl);
   const deploymentFile = resolve(ROOT, "deployments", `test-${anvilPort}.json`);
-  deployLocal(rpcUrl, deploymentFile);
+
+  if (options.forkUrl) {
+    // Anvil's default accounts carry EIP-7702 code on Sepolia, which breaks ERC-1155 mints to them.
+    const test = createTestClient({ mode: "anvil", transport: http(rpcUrl) });
+    for (const index of Object.values(ACCOUNTS)) await test.setCode({ address: testAddress(index), bytecode: "0x" });
+    // Gives the owner real Circle USDC on the fork. FiatToken v2.2 keeps balances in the mapping at slot 9.
+    await test.setStorageAt({
+      address: CIRCLE_USDC_SEPOLIA,
+      index: keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [testAddress(ACCOUNTS.owner), 9n])),
+      value: toHex(10n ** 15n, { size: 32 }),
+    });
+  }
+  deployLocal(rpcUrl, deploymentFile, options.forkUrl ? { ...V4_SEPOLIA, USDC: CIRCLE_USDC_SEPOLIA, RESOLVER: RESOLVER_SET_LATER } : {});
   const deployment = loadDeployment(deploymentFile);
   rmSync(deploymentFile);
+
+  if (options.forkUrl) {
+    const chain = {
+      id: deployment.chainId,
+      name: "sepolia fork",
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: [rpcUrl] } },
+    };
+    const test = createTestClient({ mode: "anvil", chain, transport: http(rpcUrl) });
+    const ens = await setupAgentName({
+      client: createPublicClient({ chain, transport: http(rpcUrl) }) as never,
+      wallet: createWalletClient({ account: privateKeyToAccount(testKey(ACCOUNTS.owner)), chain, transport: http(rpcUrl) }),
+      parentLabel: `clearance-${randomBytes(5).toString("hex")}`,
+      agentLabel: "alice",
+      records: agentRecords(deployment, "local-owner"),
+      waitForCommitment: async (seconds) => {
+        await test.increaseTime({ seconds });
+        await test.mine({ blocks: 1 });
+      },
+    });
+    deployment.resolver = ens.resolver;
+    deployment.agentName = ens.name;
+  }
 
   const worldPort = await freePort();
   const issuer = `http://127.0.0.1:${worldPort}`;
@@ -104,6 +145,13 @@ export async function startHarness(options: { review?: ReviewConfig[]; deadVerif
     paywall,
     publicUrl: apiUrl,
     reportToken: "test-token",
+    adminToken: ADMIN_TOKEN,
+    attestor: new LocalAttestor(
+      client as never,
+      createWalletClient({ account: privateKeyToAccount(testKey(ACCOUNTS.attestor)), chain, transport: http(rpcUrl) }),
+      deployment,
+    ),
+    scanToken: (address) => scanTokenFor(client as never, address),
     localOwnerWallet: createWalletClient({ account: privateKeyToAccount(testKey(ACCOUNTS.owner)), chain, transport: http(rpcUrl) }),
   });
   servers.push(await listen(app.fetch, apiPort));

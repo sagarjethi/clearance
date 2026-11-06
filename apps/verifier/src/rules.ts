@@ -1,5 +1,5 @@
 import type { Evaluation, Limits, Reason, Verdict } from "@clearance/shared";
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
 
 export const MAX_FACT_AGE_SECONDS = 60;
 /** Below this share of the request, a reduced trade isn't worth making, so the verifier blocks instead. */
@@ -13,6 +13,10 @@ export type TokenFacts = {
 };
 
 export type SwapFacts = {
+  account: Address;
+  poolId: Hex;
+  /** What the wallet will still let the agent spend of the input token today. */
+  remainingSpend: Sourced<bigint>;
   limits: Sourced<Limits>;
   allowedHook: Address;
   poolHook: Address;
@@ -32,16 +36,23 @@ export type SwapFacts = {
 };
 
 export type PaymentFacts = {
+  account: Address;
   limits: Sourced<Limits>;
   payee: Address;
   token: Address;
   stableTokens: Address[];
   valueUsd: number;
+  /** What this verifier has already cleared for this account in the last day. */
+  paidTodayUsd: number;
   validBefore: bigint;
   now: number;
 };
 
 export type RuleResult = Pick<Evaluation, "verdict" | "maxAmount" | "reasons">;
+
+function usd(value: number): string {
+  return `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
 
 function blocked(reasons: Reason[]): RuleResult {
   return { verdict: "BLOCK", maxAmount: "0", reasons };
@@ -69,6 +80,7 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
   const impactBps = fresh(f.impactBps, now, "price impact", reasons);
   const safeAmountIn = fresh(f.safeAmountIn, now, "safe size", reasons);
   const usdPerRawIn = fresh(f.usdPerRawIn, now, "input price", reasons);
+  const remainingSpend = fresh(f.remainingSpend, now, "daily spend", reasons);
   if (
     !limits ||
     !tokenIn ||
@@ -76,13 +88,38 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
     sizeUsd === undefined ||
     impactBps === undefined ||
     safeAmountIn === undefined ||
-    usdPerRawIn === undefined
+    usdPerRawIn === undefined ||
+    remainingSpend === undefined
   ) {
     return blocked(reasons);
   }
 
+  if (limits.account !== f.account) {
+    reasons.push({
+      code: "account_not_bound",
+      severity: "block",
+      detail: `This name's ENS record binds it to ${limits.account}, not this wallet`,
+      source: "ens",
+    });
+  }
   if (f.amountIn <= 0n) {
     reasons.push({ code: "invalid_amount", severity: "block", detail: "Amount must be above zero" });
+  }
+  if (!limits.allowedPools.includes(f.poolId.toLowerCase() as Hex)) {
+    reasons.push({
+      code: "pool_not_allowed",
+      severity: "block",
+      detail: "The owner hasn't approved this pool, so its price can't be trusted",
+      source: "ens",
+    });
+  }
+  if (remainingSpend === 0n) {
+    reasons.push({
+      code: "spend_cap_reached",
+      severity: "block",
+      detail: "The wallet's daily spend cap for this token is used up",
+      source: "wallet",
+    });
   }
   if (f.poolHook !== f.allowedHook) {
     reasons.push({ code: "pool_not_guarded", severity: "block", detail: "This pool isn't guarded by the clearance hook" });
@@ -109,7 +146,7 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
     reasons.push({
       code: "above_hard_cap",
       severity: "block",
-      detail: `$${sizeUsd.toFixed(2)} is above the owner's hard cap of $${limits.humanCapUsd}`,
+      detail: `${usd(sizeUsd)} is above the owner's hard cap of ${usd(limits.humanCapUsd)}`,
       source: "ens",
     });
   }
@@ -138,6 +175,17 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
     });
   }
 
+  if (maxAmount > remainingSpend) {
+    maxAmount = remainingSpend;
+    verdict = "REDUCE";
+    reasons.push({
+      code: "spend_cap_reduced",
+      severity: "reduce",
+      detail: "Only part of this fits under the wallet's daily spend cap",
+      source: "wallet",
+    });
+  }
+
   const reducedUsd = Number(maxAmount) * usdPerRawIn;
   if (reducedUsd > limits.maxSizeUsd) {
     if (!f.humanApproved) {
@@ -146,8 +194,8 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
         severity: "human",
         detail:
           f.humanDetail ??
-          `$${reducedUsd.toFixed(2)} is above the owner's $${limits.maxSizeUsd} limit, so a fresh human approval is required`,
-        source: "ens",
+          `${usd(reducedUsd)} is above the owner's ${usd(limits.maxSizeUsd)} limit, so a fresh human approval is required`,
+        source: f.humanDetail ? "world" : "ens",
       });
       return { verdict: "HUMAN_REQUIRED", maxAmount: "0", reasons };
     }
@@ -165,6 +213,14 @@ export function evaluatePayment(f: PaymentFacts, value: bigint): RuleResult {
   const limits = fresh(f.limits, f.now, "owner limits", reasons);
   if (!limits) return blocked(reasons);
 
+  if (limits.account !== f.account) {
+    reasons.push({
+      code: "account_not_bound",
+      severity: "block",
+      detail: `This name's ENS record binds it to ${limits.account}, not this wallet`,
+      source: "ens",
+    });
+  }
   if (!f.stableTokens.includes(f.token)) {
     reasons.push({ code: "payment_token_not_allowed", severity: "block", detail: `${f.token} isn't a payment token` });
   }
@@ -180,7 +236,15 @@ export function evaluatePayment(f: PaymentFacts, value: bigint): RuleResult {
     reasons.push({
       code: "payment_above_limit",
       severity: "block",
-      detail: `$${f.valueUsd.toFixed(2)} is above the owner's $${limits.maxPaymentUsd} payment limit`,
+      detail: `${usd(f.valueUsd)} is above the owner's ${usd(limits.maxPaymentUsd)} payment limit`,
+      source: "ens",
+    });
+  }
+  if (f.paidTodayUsd + f.valueUsd > limits.dailyPaymentUsd) {
+    reasons.push({
+      code: "daily_payment_limit",
+      severity: "block",
+      detail: `This would take payments today past the owner's ${usd(limits.dailyPaymentUsd)} limit`,
       source: "ens",
     });
   }

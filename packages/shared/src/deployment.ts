@@ -15,11 +15,13 @@ export type Deployment = {
   verifierSet: Address;
   router: Address;
   hook: Address;
+  ledger: Address;
   account: Address;
   resolver: Address;
   weth: Address;
   moon: Address;
   rug: Address;
+  liquidityHelper: Address;
   wethPool: PoolKey;
   moonPool: PoolKey;
   rugPool: PoolKey;

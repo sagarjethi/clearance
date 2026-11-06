@@ -8,22 +8,26 @@
     "test:contracts": "cd contracts && forge test",
     "test:ts": "vitest run",
     "typecheck": "tsc --noEmit -p .",
-    "up": "tsx scripts/up.ts",
-    "demo": "tsx apps/agent/src/demo.ts"
+    "demo": "tsx apps/agent/src/demo.ts",
+    "start": "tsx scripts/up.ts",
+    "deploy:sepolia": "tsx scripts/sepolia.ts",
+    "test:cre": "cd cre/attest && bun test",
+    "test:fork": "SEPOLIA_FORK_URL=${SEPOLIA_FORK_URL:-https://ethereum-sepolia-rpc.publicnode.com} vitest run --no-file-parallelism tests/ens-fork.test.ts tests/sepolia-fork.test.ts"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
-    "vitest": "^3.0.0",
-    "@clearance/api": "workspace:*",
     "@clearance/agent": "workspace:*",
+    "@clearance/api": "workspace:*",
     "@clearance/mock-world": "workspace:*",
     "@clearance/shared": "workspace:*",
     "@clearance/verifier": "workspace:*",
-    "@hono/node-server": "^1.13.0",
-    "hono": "^4.6.0",
-    "viem": "^2.21.0",
-    "jose": "^5.9.0"
+    "@hono/node-server": "^1.19.18",
+    "@types/node": "^24.19.2",
+    "hono": "^4.13.16",
+    "jose": "^5.10.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "viem": "^2.57.16",
+    "vitest": "^3.2.7",
+    "@clearance/mcp": "workspace:*"
   }
 }

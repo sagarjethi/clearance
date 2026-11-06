@@ -11,6 +11,7 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {V4Quoter} from "@uniswap/v4-periphery/src/lens/V4Quoter.sol";
@@ -19,6 +20,7 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 import {HookMiner} from "@uniswap/v4-periphery/test/shared/HookMiner.sol";
 import {ClearanceAccount} from "../src/ClearanceAccount.sol";
 import {ClearanceHook} from "../src/ClearanceHook.sol";
+import {ClearanceLedger} from "../src/ClearanceLedger.sol";
 import {ClearanceRouter} from "../src/ClearanceRouter.sol";
 import {VerifierSet} from "../src/VerifierSet.sol";
 import {LocalTextResolver} from "../src/test-support/LocalTextResolver.sol";
@@ -28,6 +30,8 @@ import {TestUSDC} from "../src/test-support/TestUSDC.sol";
 /// @notice Deploys the system and test pools. Unset addresses are deployed fresh, which is local mode.
 /// On Sepolia, set POOL_MANAGER, QUOTER, STATE_VIEW and USDC to the real contracts.
 contract Deploy is Script {
+    using PoolIdLibrary for PoolKey;
+
     address private constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     int24 private constant TICK_SPACING = 60;
     int24 private constant RANGE = 12_000;
@@ -65,17 +69,27 @@ contract Deploy is Script {
 
         bytes memory args = abi.encode(manager, verifiers, owner);
         (, bytes32 salt) = HookMiner.find(
-            CREATE2_DEPLOYER, uint160(Hooks.BEFORE_SWAP_FLAG), type(ClearanceHook).creationCode, args
+            CREATE2_DEPLOYER, uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_INITIALIZE_FLAG), type(ClearanceHook).creationCode, args
         );
         ClearanceHook hook = new ClearanceHook{salt: salt}(manager, verifiers, owner);
         hook.setRouter(address(router), true);
         hook.setQuoter(quoterAddress, true);
+
+        // Local mode: the attestor key acts as the forwarder. Sepolia passes CRE's forwarder address.
+        ClearanceLedger ledger = new ClearanceLedger(owner, vm.envAddress("ATTEST_FORWARDER"));
+        ledger.setExpectedWorkflow(vm.envOr("ATTEST_WORKFLOW_ID", bytes32(0)));
+        hook.setLedger(ledger);
 
         ClearanceAccount account = new ClearanceAccount(owner, agentKey, verifiers, router, address(hook));
 
         PlainToken weth = new PlainToken("Test Wrapped Ether", "tWETH", owner, SUPPLY);
         PlainToken moon = new PlainToken("Thin Moon", "tMOON", owner, SUPPLY);
         RugToken rug = new RugToken(owner, SUPPLY);
+
+        account.setMinSignatures(2);
+        account.setSpendCap(usdcAddress, vm.envOr("USDC_DAILY_CAP", uint256(40_000e6)));
+        account.setSpendCap(address(weth), 10e18);
+        account.setSpendCap(address(moon), 100_000e18);
 
         liquidity = new PoolModifyLiquidityTest(manager);
         usdc.approve(address(liquidity), type(uint256).max);
@@ -92,13 +106,17 @@ contract Deploy is Script {
         vm.serializeAddress("d", "verifierSet", address(verifiers));
         vm.serializeAddress("d", "router", address(router));
         vm.serializeAddress("d", "hook", address(hook));
+        vm.serializeAddress("d", "ledger", address(ledger));
         vm.serializeAddress("d", "account", address(account));
         vm.serializeAddress("d", "weth", address(weth));
         vm.serializeAddress("d", "moon", address(moon));
         vm.serializeAddress("d", "rug", address(rug));
+        vm.serializeAddress("d", "liquidityHelper", address(liquidity));
 
-        _pool("wethPool", address(weth), 3000, 5_000_000, address(hook));
-        _pool("moonPool", address(moon), 1, 5_000, address(hook));
+        PoolKey memory wethKey = _pool("wethPool", address(weth), 3000, 5_000_000, address(hook));
+        PoolKey memory moonKey = _pool("moonPool", address(moon), 1, 5_000, address(hook));
+        // Trades above $1,500 of USDC also need an independent check on the ledger.
+        hook.setAttestAbove(PoolId.unwrap(wethKey.toId()), vm.envOr("ATTEST_ABOVE", uint256(1_500e6)));
         _pool("rugPool", address(rug), 1, 500_000, address(hook));
         _pool("outsideRugPool", address(rug), 1, 500_000, address(0));
 
@@ -107,6 +125,13 @@ contract Deploy is Script {
             LocalTextResolver resolver = new LocalTextResolver(owner);
             resolverAddress = address(resolver);
             bytes32 node = vm.ensNamehash(agentName);
+            resolver.setText(node, "clearance.account", vm.toString(address(account)));
+            resolver.setText(
+                node,
+                "clearance.allowedPools",
+                string.concat(vm.toString(PoolId.unwrap(wethKey.toId())), ",", vm.toString(PoolId.unwrap(moonKey.toId())))
+            );
+            resolver.setText(node, "clearance.dailyPaymentUsd", "5");
             resolver.setText(node, "clearance.maxSizeUsd", "1000");
             resolver.setText(node, "clearance.humanCapUsd", "25000");
             resolver.setText(node, "clearance.maxImpactBps", "300");
@@ -135,7 +160,10 @@ contract Deploy is Script {
     }
 
     /// @dev Creates a USDC pair at `priceUsd` per whole token, with about `usdDepth` of USDC on the USDC side.
-    function _pool(string memory label, address token, uint256 priceUsd, uint256 usdDepth, address hook) private {
+    function _pool(string memory label, address token, uint256 priceUsd, uint256 usdDepth, address hook)
+        private
+        returns (PoolKey memory key)
+    {
         IERC20(token).approve(address(liquidity), type(uint256).max);
 
         bool usdcIsZero = address(usdc) < token;
@@ -146,7 +174,7 @@ contract Deploy is Script {
             : Math.mulDiv(priceUsd, 1 << 192, 1e12);
         uint160 sqrtPrice = uint160(Math.sqrt(priceX192));
 
-        PoolKey memory key = PoolKey(Currency.wrap(token0), Currency.wrap(token1), FEE, TICK_SPACING, IHooks(hook));
+        key = PoolKey(Currency.wrap(token0), Currency.wrap(token1), FEE, TICK_SPACING, IHooks(hook));
         manager.initialize(key, sqrtPrice);
 
         int24 tick = TickMath.getTickAtSqrtPrice(sqrtPrice);
@@ -155,7 +183,8 @@ contract Deploy is Script {
         int24 upper = tick + RANGE;
         uint160 sqrtLower = TickMath.getSqrtPriceAtTick(lower);
         uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(upper);
-        uint256 usdcAmount = usdDepth * 1e6;
+        // Testnet USDC is scarce, so a deploy with the real token can seed thinner pools.
+        uint256 usdcAmount = usdDepth * 1e6 * vm.envOr("DEPTH_BPS", uint256(10_000)) / 10_000;
         uint128 liq = usdcIsZero
             ? LiquidityAmounts.getLiquidityForAmount0(sqrtPrice, sqrtUpper, usdcAmount)
             : LiquidityAmounts.getLiquidityForAmount1(sqrtLower, sqrtPrice, usdcAmount);

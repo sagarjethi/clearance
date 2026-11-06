@@ -9,6 +9,7 @@ const signBody = z.discriminatedUnion("kind", [
     kind: z.literal("swap"),
     action: swapActionSchema,
     maxAmountIn: z.string().regex(/^\d{1,78}$/),
+    minAmountOut: z.string().regex(/^\d{1,78}$/),
     expiry: z.number().int(),
     nonce: z.string().regex(/^\d{1,78}$/),
     inputsHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform((v) => v as `0x${string}`),

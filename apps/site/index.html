@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clearance: a check AI agents can't skip</title>
+  <meta name="description" content="Independent verifiers check what an AI agent wants to do with money. Without enough signatures, the pool refuses the swap and the wallet refuses the payment." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2316324f'/><path d='M8 17l5 5 11-12' fill='none' stroke='%23fff' stroke-width='3.4'/></svg>" />
+</head>
+<body>
+  <header class="top">
+    <a class="mark" href="/"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6"/><path d="M8 17l5 5 11-12"/></svg>Clearance</a>
+    <nav aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#proof">Check a proof</a>
+      <a href="#pricing">Pricing</a>
+      <a href="/docs.html">Docs</a>
+      <a class="button small" data-dashboard href="#">Open dashboard</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>No clearance,<br />no trade.</h1>
+        <p class="lede">AI agents hold real money, and a hijacked one will happily spend it. Other tools tell an agent what looks risky, then let it decide. Clearance takes that decision away: without signatures from independent verifiers, the pool refuses the swap and the wallet refuses the payment.</p>
+        <div class="actions">
+          <a class="button" href="/docs.html#quickstart">Read the quickstart</a>
+          <a class="button quiet" data-dashboard href="#">Try to break it</a>
+        </div>
+      </div>
+      <div class="board" aria-label="Example of three agent requests and their outcomes">
+        <div class="board-cap">Example requests from one agent</div>
+        <article class="strip ok" style="--i:0">
+          <div class="strip-body"><b>Swap 100 USDC for tWETH</b><small>Within every limit the owner set</small></div>
+          <div class="stamp">Cleared</div>
+        </article>
+        <article class="strip warn" style="--i:1">
+          <div class="strip-body"><b>Swap 800 USDC for tMOON</b><small>Would move this thin pool too far, so 311 USDC is cleared</small></div>
+          <div class="stamp">Reduced</div>
+        </article>
+        <article class="strip bad" style="--i:2">
+          <div class="strip-body"><b>Swap 25,000 USDC for RUG</b><small>Its owner can blacklist holders. Sent anyway: the swap reverts</small></div>
+          <div class="stamp">Refused</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="how" class="band">
+      <h2>From request to enforcement</h2>
+      <ol class="flow">
+        <li><h3>The owner sets limits</h3><p>Size, price impact, tokens and payees sit in the agent's ENS records. Verifiers read them from the chain, so no server can loosen them.</p></li>
+        <li><h3>The agent asks</h3><p>It sends the exact swap or payment to the API, and pays for the check with x402 or an API key.</p></li>
+        <li><h3>Verifiers check separately</h3><p>Each one pulls its own data from the chain. Fixed rules decide. A model can explain or veto, and can never approve.</p></li>
+        <li><h3>A quorum signs</h3><p>Two of three sign one clearance, bound to the agent, pool, direction, amount, expiry and nonce. A refusal is simply no signature.</p></li>
+        <li><h3>Big trades get a human and a second look</h3><p>Over the owner's limit, the owner approves with World ID. A Chainlink CRE workflow then re-derives everything and writes its finding on chain.</p></li>
+        <li><h3>The chain enforces</h3><p>A Uniswap v4 hook reverts any swap without a valid clearance. The agent's smart account refuses other pools, direct transfers and uncleared payments.</p></li>
+      </ol>
+    </section>
+
+    <section class="split-section">
+      <div>
+        <h2>What a hijacked agent runs into</h2>
+        <p>Prompt injection changes what the agent says. It doesn't change what the contracts accept. Each of these runs as a real transaction in the test suite, and you can run them yourself.</p>
+      </div>
+      <table class="attacks">
+        <thead><tr><th>The attack</th><th>What stops it</th></tr></thead>
+        <tbody>
+          <tr><td>Buys a rug token after a prompt injection</td><td>No signatures, so the hook reverts</td></tr>
+          <tr><td>Takes the same trade through another pool</td><td>The wallet refuses the pool</td></tr>
+          <tr><td>Sends USDC straight to an attacker</td><td>The agent key has no transfer function</td></tr>
+          <tr><td>Pays a new address over x402</td><td>The wallet's signature needs verifiers too</td></tr>
+          <tr><td>Copies someone else's clearance</td><td>The hook checks who really called</td></tr>
+          <tr><td>Replays its own clearance</td><td>Each nonce works once</td></tr>
+          <tr><td>Stretches one human approval to a bigger trade</td><td>The approval is bound to one exact action</td></tr>
+          <tr><td>Claims another agent's name for looser limits</td><td>ENS binds each name to one wallet</td></tr>
+          <tr><td>Splits a big trade into many small ones</td><td>The wallet's daily spend cap, on chain</td></tr>
+          <tr><td>Uses a pool that shows a flattering price</td><td>Only pools the owner approved get cleared</td></tr>
+          <tr><td>Pulls liquidity right after the check</td><td>A signed minimum output, enforced by the wallet</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="proof" class="band">
+      <h2>Don't take our word for it</h2>
+      <p class="band-intro">Every decision has a public proof with its signatures and the evidence each verifier hashed. Paste a decision id, or check any token on this deployment.</p>
+      <div class="tools">
+        <form id="proof-form" class="tool">
+          <label for="proof-id">Decision id</label>
+          <div class="row"><input id="proof-id" placeholder="3f9a1c7d2b604e18" autocomplete="off" required /><button class="button">Check proof</button></div>
+          <div id="proof-result" class="result" aria-live="polite"></div>
+        </form>
+        <form id="token-form" class="tool">
+          <label for="token-address">Token address</label>
+          <div class="row"><input id="token-address" placeholder="0x…" autocomplete="off" required /><button class="button">Check token</button></div>
+          <div id="token-result" class="result" aria-live="polite"></div>
+        </form>
+      </div>
+      <div class="record">
+        <h3>Track record on this deployment</h3>
+        <dl id="record"><div><dt>Cleared</dt><dd>-</dd></div><div><dt>Refused</dt><dd>-</dd></div><div><dt>Sent to the owner</dt><dd>-</dd></div><div><dt>Independent checks passed</dt><dd>-</dd></div></dl>
+        <small id="record-note">These are live counts from this deployment's API, not a marketing number.</small>
+      </div>
+    </section>
+
+    <section id="pricing" class="pricing">
+      <h2>Pricing</h2>
+      <div class="plans">
+        <article><h3>Per check</h3><p class="price">$0.01</p><p>Your agent pays each check itself with x402, in USDC. No account or key.</p></article>
+        <article><h3>Free key</h3><p class="price">1,000 a month</p><p>Create a key in the dashboard. Good for building and testing.</p></article>
+        <article><h3>Run your own</h3><p class="price">Open source</p><p>Run a verifier, or the whole stack. The contracts and the verifier code are public.</p></article>
+      </div>
+      <p class="note">Clearance runs on test networks today, and the contracts haven't had an external audit. Don't put real funds behind it yet.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Clearance, built at ETHGlobal Mumbai 2026.</span>
+    <nav aria-label="Footer"><a href="/docs.html">Docs</a> <a data-dashboard href="#">Dashboard</a></nav>
+  </footer>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

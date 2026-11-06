@@ -1,6 +1,8 @@
+import { LocalAttestor } from "@clearance/api";
 import { mockOwner } from "@clearance/agent";
 import {
   RECORD_KEYS,
+  accountAbi,
   actionHash,
   agentNode,
   approvalNonce,
@@ -9,6 +11,7 @@ import {
   resolverAbi,
   swapClearanceDomain,
   swapClearanceTypes,
+  transferAuthorizationDigest,
   verifierSetAbi,
   checkHumanApproval,
   WORLD_ACR,
@@ -18,13 +21,26 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { SignJWT, generateKeyPair } from "jose";
 import { createHash, randomBytes } from "node:crypto";
-import { createWalletClient, hashTypedData, http, parseUnits, type Hex } from "viem";
+import { createWalletClient, hashTypedData, http, parseAbi, parseUnits, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACCOUNTS, testKey } from "../scripts/local";
-import { startHarness, type Harness } from "./harness";
+import { ADMIN_TOKEN, startHarness, type Harness } from "./harness";
 
 const usdc = (n: string) => parseUnits(n, 6);
+
+function attestorWallet(h: Harness) {
+  return createWalletClient({
+    account: privateKeyToAccount(testKey(ACCOUNTS.attestor)),
+    chain: {
+      id: h.deployment.chainId,
+      name: "anvil",
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: [h.rpcUrl] } },
+    },
+    transport: http(h.rpcUrl),
+  });
+}
 
 function ownerWallet(h: Harness) {
   return createWalletClient({
@@ -71,6 +87,7 @@ describe("against a live local system", () => {
       poolId: poolId(h.deployment.wethPool),
       zeroForOne: true,
       maxAmountIn: 5n,
+      minAmountOut: 4n,
       expiry: 6n,
       chainId: BigInt(h.deployment.chainId),
       nonce: 7n,
@@ -142,6 +159,79 @@ describe("against a live local system", () => {
     }
   });
 
+  it("splitting a large trade stops at the wallet's daily cap", async () => {
+    const wallet = ownerWallet(h);
+    const capAbi = parseAbi(["function setSpendCap(address token, uint256 cap)"]);
+    const setCap = async (amount: bigint) =>
+      h.ctx.agent.client.waitForTransactionReceipt({
+        hash: await wallet.writeContract({ address: h.deployment.account, abi: capAbi, functionName: "setSpendCap", args: [h.deployment.usdc, amount] }),
+      });
+    const remaining = await h.ctx.agent.client.readContract({ address: h.deployment.account, abi: accountAbi, functionName: "spendRemaining", args: [h.deployment.usdc] });
+    const spent = usdc("40000") - remaining;
+    await setCap(spent + usdc("150"));
+    try {
+      const { pool, zeroForOne } = wethSwap(h, usdc("100"));
+      const first = await h.ctx.agent.clearSwap(wethSwap(h, usdc("100")).action);
+      expect((await h.ctx.agent.swap(pool, zeroForOne, usdc("100"), first.hookData)).status).toBe("executed");
+
+      const second = await h.ctx.agent.clearSwap(wethSwap(h, usdc("100")).action);
+      expect(second.verdict).toBe("REDUCE");
+      expect(second.clearance?.maxAmountIn).toBe(usdc("50").toString());
+      const tooMuch = await h.ctx.agent.swap(pool, zeroForOne, usdc("100"), second.hookData);
+      expect(tooMuch).toMatchObject({ status: "reverted", reason: "SpendCapExceeded" });
+      expect((await h.ctx.agent.swap(pool, zeroForOne, usdc("50"), second.hookData)).status).toBe("executed");
+
+      const third = await h.ctx.agent.clearSwap(wethSwap(h, usdc("100")).action);
+      expect(third.verdict).toBe("BLOCK");
+      expect(third.evaluations[0]?.reasons.map((r) => r.code)).toContain("spend_cap_reached");
+    } finally {
+      await setCap(usdc("40000"));
+    }
+  });
+
+  it("a clearance carries a minimum output the wallet enforces", async () => {
+    const decision = await h.ctx.agent.clearSwap(wethSwap(h, usdc("30")).action);
+    expect(BigInt(decision.clearance!.minAmountOut)).toBeGreaterThan(0n);
+    for (const e of decision.evaluations) expect(BigInt(e.minAmountOut)).toBeGreaterThan(0n);
+  });
+
+  it("a payment request not signed by the agent key is refused before any work", async () => {
+    const authorization = {
+      from: h.deployment.account,
+      to: h.deployment.treasury,
+      value: "10000",
+      validAfter: "0",
+      validBefore: String(Math.floor(Date.now() / 1000) + 60),
+      nonce: `0x${randomBytes(32).toString("hex")}`,
+    };
+    const stranger = privateKeyToAccount(testKey(ACCOUNTS.thief));
+    const digest = transferAuthorizationDigest(h.deployment.chainId, h.deployment.usdc, "USDC", "2", authorization as never);
+    const response = await fetch(`${h.apiUrl}/v1/clear/payment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: { kind: "payment", agentName: h.deployment.agentName, account: h.deployment.account, token: h.deployment.usdc, tokenName: "USDC", tokenVersion: "2", authorization },
+        agentSignature: await stranger.sign({ hash: digest }),
+      }),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it("an attestation is refused when the digest isn't the clearance's", async () => {
+    const decision = await h.ctx.agent.clearSwap(wethSwap(h, usdc("1")).action);
+    const record = decision.clearance! as never;
+    const attestor = new LocalAttestor(h.ctx.agent.client as never, attestorWallet(h), h.deployment);
+    const outcome = await attestor.attest({
+      decisionId: "forged",
+      digest: `0x${randomBytes(32).toString("hex")}`,
+      action: wethSwap(h, usdc("1")).action,
+      clearance: record,
+      signatures: [],
+    });
+    expect(outcome.status).toBe("refused");
+    expect(outcome.problems.join()).toMatch(/digest/);
+  });
+
   it("a verifier won't sign what it didn't evaluate", async () => {
     const verifier = h.verifiers[0]!;
     const { action } = wethSwap(h, usdc("11"));
@@ -150,6 +240,7 @@ describe("against a live local system", () => {
         kind: "swap",
         action,
         maxAmountIn: action.amountIn,
+        minAmountOut: "0",
         expiry: Math.floor(Date.now() / 1000) + 60,
         nonce: "1",
         inputsHash: `0x${"00".repeat(32)}`,
@@ -162,8 +253,9 @@ describe("against a live local system", () => {
     const { action } = wethSwap(h, usdc("12"));
     const now = Math.floor(Date.now() / 1000);
     await verifier.evaluate(action);
-    const base = { kind: "swap" as const, action, expiry: now + 60, nonce: "2", inputsHash: `0x${"00".repeat(32)}` as Hex };
+    const base = { kind: "swap" as const, action, minAmountOut: "10000000000000000000", expiry: now + 60, nonce: "2", inputsHash: `0x${"00".repeat(32)}` as Hex };
     await expect(verifier.sign({ ...base, maxAmountIn: (usdc("12") + 1n).toString() })).rejects.toThrow(/above/);
+    await expect(verifier.sign({ ...base, maxAmountIn: action.amountIn, minAmountOut: "1" })).rejects.toThrow(/minimum output/);
     await expect(verifier.sign({ ...base, maxAmountIn: action.amountIn, expiry: now + 3600 })).rejects.toThrow(/expiry/);
     await expect(verifier.sign({ ...base, maxAmountIn: action.amountIn })).rejects.toThrow(/inputs hash/);
   });
@@ -433,6 +525,152 @@ describe("human approvals can't be forged or reused", () => {
     const body = await fetch(`${h.apiUrl}/v1/human/${checkpoint.id}`).then((r) => r.json());
     expect(body.status).toBe("approved");
     expect(body.idToken).toBeUndefined();
-    expect(JSON.stringify(await fetch(`${h.apiUrl}/v1/events`).then((r) => r.json()))).not.toContain("eyJ");
+    const events = await fetch(`${h.apiUrl}/v1/admin/events`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } }).then((r) => r.json());
+    expect(events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(events)).not.toContain("eyJ");
+  });
+});
+
+describe("the developer API", () => {
+  let h: Harness;
+  const admin = { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" };
+  beforeAll(async () => {
+    h = await startHarness();
+  }, 180_000);
+  afterAll(async () => {
+    await h?.stop();
+  });
+
+  const swapBody = () => JSON.stringify({ action: wethSwap(h, usdc("10")).action });
+
+  it("admin routes refuse callers without the token", async () => {
+    for (const path of ["keys", "requests", "events", "usage", "agent"]) {
+      expect((await fetch(`${h.apiUrl}/v1/admin/${path}`)).status).toBe(401);
+    }
+    const wrong = await fetch(`${h.apiUrl}/v1/admin/keys`, { headers: { authorization: "Bearer nope" } });
+    expect(wrong.status).toBe(401);
+  });
+
+  it("a key clears without paying, its secret isn't stored, and revoking stops it", async () => {
+    const created = await fetch(`${h.apiUrl}/v1/admin/keys`, { method: "POST", headers: admin, body: JSON.stringify({ name: "ci" }) }).then((r) => r.json());
+    expect(created.secret).toMatch(/^clr_/);
+    const listed = await fetch(`${h.apiUrl}/v1/admin/keys`, { headers: admin }).then((r) => r.json());
+    expect(JSON.stringify(listed)).not.toContain(created.secret);
+
+    const paid = await fetch(`${h.apiUrl}/v1/clear/swap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${created.secret}`, "content-type": "application/json" },
+      body: swapBody(),
+    });
+    expect(paid.status).toBe(200);
+    expect((await paid.json()).verdict).toBe("ALLOW");
+
+    const requests = await fetch(`${h.apiUrl}/v1/admin/requests`, { headers: admin }).then((r) => r.json());
+    expect(requests[0]).toMatchObject({ auth: "api_key", keyId: created.id, verdict: "ALLOW", status: 200 });
+
+    await fetch(`${h.apiUrl}/v1/admin/keys/${created.id}`, { method: "DELETE", headers: admin });
+    const revoked = await fetch(`${h.apiUrl}/v1/clear/swap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${created.secret}`, "content-type": "application/json" },
+      body: swapBody(),
+    });
+    expect(revoked.status).toBe(401);
+  });
+
+  it("a made-up key gets a 401, not a free check", async () => {
+    const response = await fetch(`${h.apiUrl}/v1/clear/swap`, {
+      method: "POST",
+      headers: { authorization: "Bearer clr_madeup", "content-type": "application/json" },
+      body: swapBody(),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it("no key and no payment gets a 402", async () => {
+    const response = await fetch(`${h.apiUrl}/v1/clear/swap`, { method: "POST", headers: { "content-type": "application/json" }, body: swapBody() });
+    expect(response.status).toBe(402);
+  });
+
+  it("anyone can read a proof, and it matches what the chain accepts", async () => {
+    const decision = await h.ctx.agent.clearSwap(wethSwap(h, usdc("15")).action);
+    const proof = await fetch(`${h.apiUrl}/v1/proofs/${decision.id}`).then((r) => r.json());
+    expect(proof.verdict).toBe("ALLOW");
+    expect(proof.signatures).toHaveLength(decision.evaluations.length);
+    const quorum = await h.ctx.agent.client.readContract({
+      address: h.deployment.verifierSet,
+      abi: verifierSetAbi,
+      functionName: "hasQuorum",
+      args: [proof.digest, proof.signatures],
+    });
+    expect(quorum).toBe(true);
+    expect((await fetch(`${h.apiUrl}/v1/proofs/nope`)).status).toBe(404);
+  });
+
+  it("the token check flags the rug and clears the plain token", async () => {
+    const rug = await fetch(`${h.apiUrl}/v1/tokens/${h.deployment.rug}/check`).then((r) => r.json());
+    expect(rug.verdict).toBe("RISKY");
+    expect(rug.hazards).toEqual(expect.arrayContaining(["blacklist(address)", "mint(address,uint256)"]));
+    const plain = await fetch(`${h.apiUrl}/v1/tokens/${h.deployment.weth}/check`).then((r) => r.json());
+    expect(plain.hazards).toEqual([]);
+    expect((await fetch(`${h.apiUrl}/v1/tokens/nope/check`)).status).toBe(400);
+  });
+
+  it("an attestation is refused when the owner changes limits after the clearance", async () => {
+    const { action, pool, zeroForOne } = wethSwap(h, usdc("1600"));
+    await setRecord(h, "maxSizeUsd", "2000");
+    let decision;
+    try {
+      decision = await h.ctx.agent.clearSwap(action);
+      expect(decision.attestationRequired).toBe(true);
+    } finally {
+      await setRecord(h, "maxSizeUsd", "1000");
+    }
+    const attested = await h.ctx.agent.attest(decision.id);
+    expect(attested.status).toBe("refused");
+    expect(attested.problems.join()).toMatch(/limits changed/);
+    const tx = await h.ctx.agent.swap(pool, zeroForOne, usdc("1600"), decision.hookData);
+    expect(tx).toMatchObject({ status: "reverted", reason: "NotAttested" });
+  });
+
+  it("a wallet the ENS record doesn't bind gets no signatures", async () => {
+    await setRecord(h, "account", h.deployment.treasury);
+    try {
+      const verifier = h.verifiers[0]!;
+      const evaluation = await verifier.evaluate(wethSwap(h, usdc("1")).action);
+      expect(evaluation.verdict).toBe("BLOCK");
+      expect(evaluation.reasons.map((r) => r.code)).toContain("account_not_bound");
+    } finally {
+      await setRecord(h, "account", h.deployment.account);
+    }
+  });
+
+  it("the track record counts real decisions", async () => {
+    const record = await fetch(`${h.apiUrl}/v1/track-record`).then((r) => r.json());
+    expect(record.verdicts.ALLOW).toBeGreaterThan(0);
+    expect(record.verifiers).toHaveLength(3);
+  });
+});
+
+describe("owner checkpoints", () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await startHarness({ x402: false });
+  }, 180_000);
+  afterAll(async () => {
+    await h?.stop();
+  });
+
+  it("asking twice leaves one open question, and a retry opens none", async () => {
+    const { action } = wethSwap(h, usdc("2800"));
+    const first = await h.ctx.agent.clearSwap(action);
+    const second = await h.ctx.agent.clearSwap(action);
+    expect(second.checkpoint?.id).toBe(first.checkpoint?.id);
+
+    const retry = await h.ctx.agent.clearSwap(action, first.checkpoint!.id);
+    expect(retry.verdict).toBe("HUMAN_REQUIRED");
+    expect(retry.checkpoint).toBeUndefined();
+
+    const other = await h.ctx.agent.clearSwap(wethSwap(h, usdc("2900")).action);
+    expect(other.checkpoint?.id).not.toBe(first.checkpoint?.id);
   });
 });

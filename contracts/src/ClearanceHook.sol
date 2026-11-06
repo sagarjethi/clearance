@@ -12,6 +12,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IMsgSender} from "@uniswap/v4-periphery/src/interfaces/IMsgSender.sol";
+import {ClearanceLedger} from "./ClearanceLedger.sol";
 import {VerifierSet} from "./VerifierSet.sol";
 
 /// @notice A v4 hook for opt-in safe pools: no swap happens without a quorum-signed clearance.
@@ -24,6 +25,7 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
         bytes32 poolId;
         bool zeroForOne;
         uint256 maxAmountIn;
+        uint256 minAmountOut;
         uint64 expiry;
         uint64 chainId;
         uint256 nonce;
@@ -31,18 +33,25 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     }
 
     bytes32 public constant SWAP_CLEARANCE_TYPEHASH = keccak256(
-        "SwapClearance(address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash)"
+        "SwapClearance(address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint256 minAmountOut,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash)"
     );
 
     IPoolManager public immutable poolManager;
     VerifierSet public immutable verifiers;
 
     mapping(address => bool) public isRouter;
+    /// @notice Who may open a pool on this hook. A stranger's pool could set any price it liked.
+    mapping(address => bool) public isPoolCreator;
     /// @dev Quoters revert every swap they make by design, so letting them through can't move funds.
     mapping(address => bool) public isQuoter;
     mapping(address => mapping(uint256 => bool)) public nonceUsed;
+    /// @notice Independent checks live here. Unset means no clearance needs one.
+    ClearanceLedger public ledger;
+    /// @notice Above this cleared input amount, a pool also needs a ledger attestation. Zero means never.
+    mapping(bytes32 => uint256) public attestAbove;
 
     error NotPoolManager();
+    error PoolCreatorNotAllowed(address creator);
     error HookNotImplemented();
     error NoClearance();
     error RouterNotAllowed(address router);
@@ -55,9 +64,13 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     error AmountAboveClearance(uint256 amountIn, uint256 maxAmountIn);
     error NonceUsed(uint256 nonce);
     error NoQuorum();
+    error NotAttested();
 
+    event PoolCreatorSet(address indexed creator, bool allowed);
     event RouterSet(address indexed router, bool allowed);
     event QuoterSet(address indexed quoter, bool allowed);
+    event LedgerSet(address indexed ledger);
+    event AttestAboveSet(bytes32 indexed poolId, uint256 amount);
     event SwapCleared(address indexed agent, bytes32 indexed poolId, uint256 nonce, uint256 amountIn, bytes32 inputsHash);
 
     constructor(IPoolManager poolManager_, VerifierSet verifiers_, address owner_)
@@ -66,10 +79,12 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     {
         poolManager = poolManager_;
         verifiers = verifiers_;
+        isPoolCreator[owner_] = true;
+        emit PoolCreatorSet(owner_, true);
         Hooks.validateHookPermissions(
             IHooks(address(this)),
             Hooks.Permissions({
-                beforeInitialize: false,
+                beforeInitialize: true,
                 afterInitialize: false,
                 beforeAddLiquidity: false,
                 afterAddLiquidity: false,
@@ -87,6 +102,11 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
         );
     }
 
+    function setPoolCreator(address creator, bool allowed) external onlyOwner {
+        isPoolCreator[creator] = allowed;
+        emit PoolCreatorSet(creator, allowed);
+    }
+
     function setRouter(address router, bool allowed) external onlyOwner {
         isRouter[router] = allowed;
         emit RouterSet(router, allowed);
@@ -95,6 +115,16 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     function setQuoter(address quoter, bool allowed) external onlyOwner {
         isQuoter[quoter] = allowed;
         emit QuoterSet(quoter, allowed);
+    }
+
+    function setLedger(ClearanceLedger ledger_) external onlyOwner {
+        ledger = ledger_;
+        emit LedgerSet(address(ledger_));
+    }
+
+    function setAttestAbove(bytes32 poolId, uint256 amount) external onlyOwner {
+        attestAbove[poolId] = amount;
+        emit AttestAboveSet(poolId, amount);
     }
 
     function clearanceDigest(SwapClearance memory c) public view returns (bytes32) {
@@ -106,6 +136,7 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
                     c.poolId,
                     c.zeroForOne,
                     c.maxAmountIn,
+                    c.minAmountOut,
                     c.expiry,
                     c.chainId,
                     c.nonce,
@@ -151,13 +182,21 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
         if (nonceUsed[c.agent][c.nonce]) revert NonceUsed(c.nonce);
         nonceUsed[c.agent][c.nonce] = true;
 
-        if (!verifiers.hasQuorum(clearanceDigest(c), signatures)) revert NoQuorum();
+        bytes32 digest = clearanceDigest(c);
+        if (!verifiers.hasQuorum(digest, signatures)) revert NoQuorum();
+
+        uint256 threshold = attestAbove[c.poolId];
+        if (threshold != 0 && c.maxAmountIn > threshold) {
+            if (address(ledger) == address(0) || !ledger.isAttested(digest)) revert NotAttested();
+        }
 
         emit SwapCleared(c.agent, c.poolId, c.nonce, amountIn, c.inputsHash);
     }
 
-    function beforeInitialize(address, PoolKey calldata, uint160) external pure override returns (bytes4) {
-        revert HookNotImplemented();
+    function beforeInitialize(address sender, PoolKey calldata, uint160) external view override returns (bytes4) {
+        if (msg.sender != address(poolManager)) revert NotPoolManager();
+        if (!isPoolCreator[sender]) revert PoolCreatorNotAllowed(sender);
+        return IHooks.beforeInitialize.selector;
     }
 
     function afterInitialize(address, PoolKey calldata, uint160, int24) external pure override returns (bytes4) {
