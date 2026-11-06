@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+deployments/local.json
+*.log

@@ -1,0 +1,17 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 44444444
+bytecode_hash = "none"
+via_ir = true
+ffi = false
+fs_permissions = [{ access = "read-write", path = "../deployments" }, { access = "read", path = "./out" }]
+
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
