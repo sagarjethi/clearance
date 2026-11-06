@@ -13,7 +13,7 @@ You need Foundry, Node 22 or newer, pnpm and Bun.
 Nothing here needs real funds or keys.
 
 ```bash
-git clone --recursive <repo> clearance
+git clone --recursive https://github.com/sagarjethi/clearance.git
 cd clearance
 pnpm install
 pnpm start
