@@ -1,12 +1,15 @@
 import {
   RECORD_KEYS,
+  accountAbi,
   agentNode,
   erc20Abi,
+  ledgerAbi,
   parseLimits,
   readAgentRecords,
   paymentActionSchema,
   resolverAbi,
   swapActionSchema,
+  transferAuthorizationDigest,
   verifierSetAbi,
   type Action,
   type Deployment,
@@ -14,11 +17,12 @@ import {
   type Limits,
 } from "@clearance/shared";
 import { createHash, randomBytes } from "node:crypto";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import { getAddress, isAddress, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
+import { getAddress, isAddress, recoverAddress, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 import { z } from "zod";
 import type { AttestationOutcome, Attestor } from "./attestor";
 import { Coordinator, type Decision } from "./coordinator";
@@ -51,7 +55,11 @@ export type ApiConfig = {
 type Variables = { keyId?: string; authKind: "api_key" | "x402" | "none"; decision?: Decision };
 
 const swapBody = z.object({ action: swapActionSchema, checkpointId: z.string().max(64).optional() });
-const paymentBody = z.object({ action: paymentActionSchema });
+const paymentBody = z.object({
+  action: paymentActionSchema,
+  /** The agent key's signature over this payment, so only the real agent can spend verifier and model time. */
+  agentSignature: z.string().regex(/^0x[0-9a-fA-F]{130}$/).transform((v) => v as Hex),
+});
 const outcomeBody = z.object({
   scenario: z.string().max(80).optional(),
   label: z.string().max(200),
@@ -64,6 +72,7 @@ const limitsBody = z.object({
   maxSizeUsd: z.number().min(0).optional(),
   humanCapUsd: z.number().min(0).optional(),
   maxImpactBps: z.number().int().min(0).max(10_000).optional(),
+  dailyPaymentUsd: z.number().min(0).optional(),
 });
 const keyBody = z.object({ name: z.string().trim().min(1).max(60) });
 
@@ -83,6 +92,7 @@ export function apiApp(config: ApiConfig) {
   const quota = config.monthlyQuota ?? DEFAULT_QUOTA;
   const app = new Hono<{ Variables: Variables }>();
   const subscribers = new Set<(event: FeedEvent) => void>();
+  const attesting = new Map<string, Promise<AttestationOutcome>>();
 
   const publish = (type: FeedEvent["type"], data: unknown) => {
     const event = store.addEvent(type, data);
@@ -126,10 +136,10 @@ export function apiApp(config: ApiConfig) {
     await next();
   };
 
-  /** Requests from one address per minute, for the public read endpoints. */
+  /** Requests from one address per minute. Uses the socket's address, because clients can forge forwarding headers. */
   const hits = new Map<string, { windowStart: number; count: number }>();
   const rateLimit: MiddlewareHandler = async (c, next) => {
-    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+    const ip = getConnInfo(c).remote.address ?? "unknown";
     const now = Date.now();
     const entry = hits.get(ip);
     if (!entry || now - entry.windowStart > 60_000) hits.set(ip, { windowStart: now, count: 1 });
@@ -223,12 +233,21 @@ export function apiApp(config: ApiConfig) {
     return c.json(decision);
   });
 
-  app.post("/v1/clear/payment", async (c) => {
+  app.post("/v1/clear/payment", rateLimit, async (c) => {
     const parsed = paymentBody.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "invalid request", issues: parsed.error.issues }, 400);
-    const unknown = checkAgent(parsed.data.action);
+    const { action, agentSignature } = parsed.data;
+    const unknown = checkAgent(action);
     if (unknown) return c.json({ error: unknown }, 404);
-    const decision = await coordinator.decide(parsed.data.action);
+
+    const digest = transferAuthorizationDigest(deployment.chainId, action.token, action.tokenName, action.tokenVersion, action.authorization);
+    const [signer, agentKey] = await Promise.all([
+      recoverAddress({ hash: digest, signature: agentSignature }),
+      client.readContract({ address: action.account, abi: accountAbi, functionName: "agentKey" }),
+    ]);
+    if (signer !== agentKey) return c.json({ error: "This payment isn't signed by the account's agent key" }, 401);
+
+    const decision = await coordinator.decide(action);
     c.set("decision", decision);
     record(decision);
     return c.json(decision);
@@ -241,16 +260,21 @@ export function apiApp(config: ApiConfig) {
     const stored = store.decision<Decision & { attestation?: AttestationOutcome }>(c.req.param("id"));
     if (!stored) return c.json({ error: "No such decision" }, 404);
     if (stored.attestation && stored.attestation.status !== "failed") return c.json(stored.attestation);
-    if (stored.action.kind !== "swap" || !stored.clearance || !stored.digest || !stored.signatures) {
-      return c.json({ error: "Only a cleared swap can be attested" }, 409);
+    if (stored.action.kind !== "swap" || !stored.clearance || !stored.digest || !stored.signatures || !stored.attestationRequired) {
+      return c.json({ error: "Only a cleared swap that needs a check can be attested" }, 409);
     }
-    const attestation = await config.attestor.attest({
-      decisionId: stored.id,
-      digest: stored.digest,
-      action: stored.action,
-      clearance: stored.clearance,
-      signatures: stored.signatures,
-    });
+    // One run per decision. An attestation can start a long process, so a repeat joins the one running.
+    const id = stored.id;
+    let running = attesting.get(id);
+    const first = !running;
+    if (!running) {
+      running = config.attestor
+        .attest({ decisionId: id, digest: stored.digest, action: stored.action, clearance: stored.clearance, signatures: stored.signatures })
+        .finally(() => attesting.delete(id));
+      attesting.set(id, running);
+    }
+    const attestation = await running;
+    if (!first) return c.json(attestation);
     store.saveDecision(stored.id, stored.verdict, { ...stored, attestation });
     publish("outcome", {
       label: attestation.status === "attested" ? "Independent check attested this clearance" : "Independent check refused this clearance",
@@ -288,14 +312,19 @@ export function apiApp(config: ApiConfig) {
     return c.json({ ...result, verdict: result.hazards.length ? "RISKY" : "NO_ADMIN_FUNCTIONS_FOUND" });
   });
 
-  app.get("/v1/attestations/pending", rateLimit, (c) => {
+  app.get("/v1/attestations/pending", rateLimit, async (c) => {
     const now = Math.floor(Date.now() / 1000);
-    const pending = store
+    const candidates = store
       .recentDecisions<Decision & { attestation?: AttestationOutcome }>(200)
-      .filter((d) => d.attestationRequired && !d.attestation && (d.clearance?.expiry ?? 0) > now)
-      .map((d) => d.id)
+      .filter((d) => d.attestationRequired && !d.attestation && d.digest && (d.clearance?.expiry ?? 0) > now)
       .reverse();
-    return c.json({ ids: pending });
+    // The ledger is the record of what's done, because scheduled runs report only to the chain.
+    const statuses = await Promise.all(
+      candidates.map((d) =>
+        client.readContract({ address: deployment.ledger, abi: ledgerAbi, functionName: "attestations", args: [d.digest!] }),
+      ),
+    );
+    return c.json({ ids: candidates.filter((_, i) => statuses[i]![0] === 0).map((d) => d.id) });
   });
 
   app.get("/v1/track-record", (c) => {

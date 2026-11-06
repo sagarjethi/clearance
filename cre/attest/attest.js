@@ -25875,6 +25875,7 @@ var swapClearanceTypes = {
     { name: "poolId", type: "bytes32" },
     { name: "zeroForOne", type: "bool" },
     { name: "maxAmountIn", type: "uint256" },
+    { name: "minAmountOut", type: "uint256" },
     { name: "expiry", type: "uint64" },
     { name: "chainId", type: "uint64" },
     { name: "nonce", type: "uint256" },
@@ -25899,11 +25900,21 @@ var REFUSED = 2;
 function evaluateAttestation(input) {
   const { action, clearance, limits } = input;
   const problems = [];
+  if (input.claimedDigest.toLowerCase() !== input.computedDigest.toLowerCase()) {
+    problems.push("The digest isn't the one this clearance produces");
+  }
+  const id = poolId(action.pool);
+  if (!limits.allowedPools.includes(id.toLowerCase()))
+    problems.push("The owner hasn't approved this pool");
+  for (const token of [action.pool.currency0, action.pool.currency1]) {
+    if (!limits.allowedTokens.some((allowed) => isAddressEqual(allowed, token)))
+      problems.push(`${token} isn't on the owner's token list`);
+  }
   if (!isAddressEqual(clearance.agent, action.account))
     problems.push("Clearance agent isn't the action's account");
   if (!isAddressEqual(limits.account, action.account))
     problems.push("ENS record binds this name to another account");
-  if (clearance.poolId !== poolId(action.pool))
+  if (clearance.poolId !== id)
     problems.push("Clearance pool isn't the action's pool");
   if (clearance.zeroForOne !== action.zeroForOne)
     problems.push("Clearance direction isn't the action's direction");
@@ -25934,6 +25945,8 @@ var RECORD_KEYS = {
   maxImpactBps: "clearance.maxImpactBps",
   requiredVerifiers: "clearance.requiredVerifiers",
   allowedTokens: "clearance.allowedTokens",
+  allowedPools: "clearance.allowedPools",
+  dailyPaymentUsd: "clearance.dailyPaymentUsd",
   maxPaymentUsd: "clearance.maxPaymentUsd",
   allowedPayees: "clearance.allowedPayees",
   ownerSub: "clearance.ownerSub"
@@ -25957,6 +25970,16 @@ function addressList(name, raw) {
     return getAddress2(trimmed);
   });
 }
+function poolList(raw) {
+  if (raw.trim() === "")
+    return [];
+  return raw.split(",").map((part) => {
+    const trimmed = part.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(trimmed))
+      throw new LimitsError(`allowedPools has an invalid pool id: ${trimmed}`);
+    return trimmed;
+  });
+}
 function parseLimits(raw) {
   const requiredVerifiers = positiveNumber("requiredVerifiers", raw.requiredVerifiers);
   if (!Number.isInteger(requiredVerifiers) || requiredVerifiers < 1) {
@@ -25971,6 +25994,8 @@ function parseLimits(raw) {
     maxImpactBps: positiveNumber("maxImpactBps", raw.maxImpactBps),
     requiredVerifiers,
     allowedTokens: addressList("allowedTokens", raw.allowedTokens),
+    allowedPools: poolList(raw.allowedPools),
+    dailyPaymentUsd: positiveNumber("dailyPaymentUsd", raw.dailyPaymentUsd),
     maxPaymentUsd: positiveNumber("maxPaymentUsd", raw.maxPaymentUsd),
     allowedPayees: addressList("allowedPayees", raw.allowedPayees),
     ownerSub: raw.ownerSub
@@ -26034,6 +26059,9 @@ function textLookupArgs(name, key) {
 function decodeTextLookup(result) {
   return decodeFunctionResult2({ abi: resolveAbi, functionName: "text", data: result });
 }
+var hookAbi = parseAbi([
+  "function clearanceDigest((address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint256 minAmountOut,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash) c) view returns (bytes32)"
+]);
 var verifierSetAbi = parseAbi(["function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)"]);
 var stateViewAbi = parseAbi([
   "function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)"
@@ -26081,6 +26109,16 @@ function attestDecision(runtime2, decisionId) {
   ]));
   const limits = parseLimits(records);
   const quorum = read2(runtime2, client, config.verifierSet, verifierSetAbi, "hasQuorum", [proof.digest, proof.signatures]);
+  const computedDigest = read2(runtime2, client, config.hook, hookAbi, "clearanceDigest", [
+    {
+      ...proof.clearance,
+      maxAmountIn: BigInt(proof.clearance.maxAmountIn),
+      minAmountOut: BigInt(proof.clearance.minAmountOut),
+      expiry: BigInt(proof.clearance.expiry),
+      chainId: BigInt(proof.clearance.chainId),
+      nonce: BigInt(proof.clearance.nonce)
+    }
+  ]);
   let impactBps;
   try {
     const slot0 = read2(runtime2, client, config.stateView, stateViewAbi, "getSlot0", [proof.clearance.poolId]);
@@ -26099,6 +26137,8 @@ function attestDecision(runtime2, decisionId) {
     clearance: proof.clearance,
     limits,
     quorum,
+    claimedDigest: proof.digest,
+    computedDigest,
     impactBps,
     now: Math.floor(runtime2.now().getTime() / 1000),
     chainId: config.chainId

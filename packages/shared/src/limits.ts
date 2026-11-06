@@ -7,6 +7,8 @@ export const RECORD_KEYS = {
   maxImpactBps: "clearance.maxImpactBps",
   requiredVerifiers: "clearance.requiredVerifiers",
   allowedTokens: "clearance.allowedTokens",
+  allowedPools: "clearance.allowedPools",
+  dailyPaymentUsd: "clearance.dailyPaymentUsd",
   maxPaymentUsd: "clearance.maxPaymentUsd",
   allowedPayees: "clearance.allowedPayees",
   ownerSub: "clearance.ownerSub",
@@ -19,6 +21,9 @@ export type Limits = {
   maxImpactBps: number;
   requiredVerifiers: number;
   allowedTokens: Address[];
+  /** Pool ids the owner approved. A pool's own price means nothing unless the owner trusts that pool. */
+  allowedPools: Hex[];
+  dailyPaymentUsd: number;
   maxPaymentUsd: number;
   allowedPayees: Address[];
   ownerSub: string;
@@ -43,6 +48,15 @@ function addressList(name: string, raw: string): Address[] {
   });
 }
 
+function poolList(raw: string): Hex[] {
+  if (raw.trim() === "") return [];
+  return raw.split(",").map((part) => {
+    const trimmed = part.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(trimmed)) throw new LimitsError(`allowedPools has an invalid pool id: ${trimmed}`);
+    return trimmed as Hex;
+  });
+}
+
 /** A missing or malformed limit throws. Callers treat that as BLOCK, so a bad record can't widen anything. */
 export function parseLimits(raw: RawRecords): Limits {
   const requiredVerifiers = positiveNumber("requiredVerifiers", raw.requiredVerifiers);
@@ -57,6 +71,8 @@ export function parseLimits(raw: RawRecords): Limits {
     maxImpactBps: positiveNumber("maxImpactBps", raw.maxImpactBps),
     requiredVerifiers,
     allowedTokens: addressList("allowedTokens", raw.allowedTokens),
+    allowedPools: poolList(raw.allowedPools),
+    dailyPaymentUsd: positiveNumber("dailyPaymentUsd", raw.dailyPaymentUsd),
     maxPaymentUsd: positiveNumber("maxPaymentUsd", raw.maxPaymentUsd),
     allowedPayees: addressList("allowedPayees", raw.allowedPayees),
     ownerSub: raw.ownerSub,

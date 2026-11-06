@@ -25,6 +25,7 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
         bytes32 poolId;
         bool zeroForOne;
         uint256 maxAmountIn;
+        uint256 minAmountOut;
         uint64 expiry;
         uint64 chainId;
         uint256 nonce;
@@ -32,13 +33,15 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     }
 
     bytes32 public constant SWAP_CLEARANCE_TYPEHASH = keccak256(
-        "SwapClearance(address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash)"
+        "SwapClearance(address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint256 minAmountOut,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash)"
     );
 
     IPoolManager public immutable poolManager;
     VerifierSet public immutable verifiers;
 
     mapping(address => bool) public isRouter;
+    /// @notice Who may open a pool on this hook. A stranger's pool could set any price it liked.
+    mapping(address => bool) public isPoolCreator;
     /// @dev Quoters revert every swap they make by design, so letting them through can't move funds.
     mapping(address => bool) public isQuoter;
     mapping(address => mapping(uint256 => bool)) public nonceUsed;
@@ -48,6 +51,7 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     mapping(bytes32 => uint256) public attestAbove;
 
     error NotPoolManager();
+    error PoolCreatorNotAllowed(address creator);
     error HookNotImplemented();
     error NoClearance();
     error RouterNotAllowed(address router);
@@ -62,6 +66,7 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     error NoQuorum();
     error NotAttested();
 
+    event PoolCreatorSet(address indexed creator, bool allowed);
     event RouterSet(address indexed router, bool allowed);
     event QuoterSet(address indexed quoter, bool allowed);
     event LedgerSet(address indexed ledger);
@@ -74,10 +79,12 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     {
         poolManager = poolManager_;
         verifiers = verifiers_;
+        isPoolCreator[owner_] = true;
+        emit PoolCreatorSet(owner_, true);
         Hooks.validateHookPermissions(
             IHooks(address(this)),
             Hooks.Permissions({
-                beforeInitialize: false,
+                beforeInitialize: true,
                 afterInitialize: false,
                 beforeAddLiquidity: false,
                 afterAddLiquidity: false,
@@ -93,6 +100,11 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
                 afterRemoveLiquidityReturnDelta: false
             })
         );
+    }
+
+    function setPoolCreator(address creator, bool allowed) external onlyOwner {
+        isPoolCreator[creator] = allowed;
+        emit PoolCreatorSet(creator, allowed);
     }
 
     function setRouter(address router, bool allowed) external onlyOwner {
@@ -124,6 +136,7 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
                     c.poolId,
                     c.zeroForOne,
                     c.maxAmountIn,
+                    c.minAmountOut,
                     c.expiry,
                     c.chainId,
                     c.nonce,
@@ -180,8 +193,10 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
         emit SwapCleared(c.agent, c.poolId, c.nonce, amountIn, c.inputsHash);
     }
 
-    function beforeInitialize(address, PoolKey calldata, uint160) external pure override returns (bytes4) {
-        revert HookNotImplemented();
+    function beforeInitialize(address sender, PoolKey calldata, uint160) external view override returns (bytes4) {
+        if (msg.sender != address(poolManager)) revert NotPoolManager();
+        if (!isPoolCreator[sender]) revert PoolCreatorNotAllowed(sender);
+        return IHooks.beforeInitialize.selector;
     }
 
     function afterInitialize(address, PoolKey calldata, uint160, int24) external pure override returns (bytes4) {

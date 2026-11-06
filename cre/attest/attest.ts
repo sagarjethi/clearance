@@ -23,6 +23,7 @@ export type Config = {
   chainId: number;
   gasLimit: string;
   resolver: Address;
+  hook: Address;
   verifierSet: Address;
   quoter: Address;
   stateView: Address;
@@ -37,6 +38,9 @@ type Proof = {
   digest?: Hex;
 };
 
+const hookAbi = parseAbi([
+  "function clearanceDigest((address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint256 minAmountOut,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash) c) view returns (bytes32)",
+]);
 const verifierSetAbi = parseAbi(["function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)"]);
 const stateViewAbi = parseAbi([
   "function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)",
@@ -108,6 +112,17 @@ export function attestDecision(runtime: Runtime<Config>, decisionId: string): st
 
   const quorum = read(runtime, client, config.verifierSet, verifierSetAbi, "hasQuorum", [proof.digest, proof.signatures]) as boolean;
 
+  const computedDigest = read(runtime, client, config.hook, hookAbi, "clearanceDigest", [
+    {
+      ...proof.clearance,
+      maxAmountIn: BigInt(proof.clearance.maxAmountIn),
+      minAmountOut: BigInt(proof.clearance.minAmountOut),
+      expiry: BigInt(proof.clearance.expiry),
+      chainId: BigInt(proof.clearance.chainId),
+      nonce: BigInt(proof.clearance.nonce),
+    },
+  ]) as Hex;
+
   let impactBps: number | undefined;
   try {
     const slot0 = read(runtime, client, config.stateView, stateViewAbi, "getSlot0", [proof.clearance.poolId]) as readonly [bigint, ...unknown[]];
@@ -127,6 +142,8 @@ export function attestDecision(runtime: Runtime<Config>, decisionId: string): st
     clearance: proof.clearance,
     limits,
     quorum,
+    claimedDigest: proof.digest,
+    computedDigest,
     impactBps,
     now: Math.floor(runtime.now().getTime() / 1000),
     chainId: config.chainId,

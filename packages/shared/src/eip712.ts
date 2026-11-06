@@ -14,6 +14,7 @@ export type SwapClearance = {
   poolId: Hex;
   zeroForOne: boolean;
   maxAmountIn: bigint;
+  minAmountOut: bigint;
   expiry: bigint;
   chainId: bigint;
   nonce: bigint;
@@ -26,6 +27,7 @@ export const swapClearanceTypes = {
     { name: "poolId", type: "bytes32" },
     { name: "zeroForOne", type: "bool" },
     { name: "maxAmountIn", type: "uint256" },
+    { name: "minAmountOut", type: "uint256" },
     { name: "expiry", type: "uint64" },
     { name: "chainId", type: "uint64" },
     { name: "nonce", type: "uint256" },

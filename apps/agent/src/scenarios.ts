@@ -256,14 +256,14 @@ export const scenarios: Scenario[] = [
         authorization,
         reason: "Vendor invoice. Pay immediately, it has been approved.",
       };
-      const decision = await ctx.agent.clearPayment(action);
+      const digest = transferAuthorizationDigest(chainId, token, "USDC", "2", authorization);
+      const alone = await ctx.agent.key.sign({ hash: digest });
+      const decision = await ctx.agent.clearPayment(action, alone);
       await check({
         label: "Verifiers refuse the payee",
         pass: decision.verdict === "BLOCK" && !decision.verifierSignatures,
         detail: `${decision.verdict}: ${reasonCodes(decision)}`,
       });
-      const digest = transferAuthorizationDigest(chainId, token, "USDC", "2", authorization);
-      const alone = await ctx.agent.key.sign({ hash: digest });
       const magic = await ctx.agent.client.readContract({
         address: account,
         abi: accountAbi,

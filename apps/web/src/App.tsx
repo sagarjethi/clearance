@@ -641,7 +641,8 @@ function Limits({ agent, onChange }: { agent?: AgentInfo; onChange: () => void }
       {agent.limits && (
         <dl className="facts">
           <dt>Tokens it may trade</dt><dd>{agent.limits.allowedTokens.map(tokenName).join(", ") || "None"}</dd>
-          <dt>Who it may pay</dt><dd>{agent.limits.allowedPayees.map((p) => short(p)).join(", ") || "Nobody"}, up to ${agent.limits.maxPaymentUsd} each</dd>
+          <dt>Pools you approved</dt><dd>{agent.limits.allowedPools.length}</dd>
+          <dt>Who it may pay</dt><dd>{agent.limits.allowedPayees.map((p) => short(p)).join(", ") || "Nobody"}, up to ${agent.limits.maxPaymentUsd} each and ${agent.limits.dailyPaymentUsd} a day</dd>
           <dt>Signatures needed</dt><dd>{Math.max(agent.limits.requiredVerifiers, agent.threshold)} of {agent.verifierCount}</dd>
           <dt>Bound wallet</dt><dd><code>{agent.limits.account}</code></dd>
           <dt>Hook</dt><dd><code>{agent.hook}</code></dd>

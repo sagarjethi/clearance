@@ -46,7 +46,7 @@ pnpm start</code></pre>
 }</code></pre>
       <p>When cleared, the response carries <code>hookData</code>. Pass it to your account's <code>swapCleared</code>:</p>
 <pre><code>account.swapCleared(pool, zeroForOne, amountIn, minOut, hookData)</code></pre>
-      <p>A clearance lasts 90 seconds, works once, and only for the account it names.</p>
+      <p>A clearance lasts 90 seconds, works once, and only for the account it names. It also carries a minimum output, which the wallet enforces, so liquidity pulled after the check can't hurt the trade.</p>
       <p>Exact-output swaps are always refused, because a hook can't bound their input before the swap runs.</p>
 
       <h2 id="verdicts">Verdicts</h2>
@@ -75,7 +75,7 @@ pnpm start</code></pre>
       <p>A Chainlink CRE workflow re-reads the owner's limits, confirms the quorum against the contract and re-quotes the market. It writes either an attestation or a refusal to <code>ClearanceLedger</code>. The first report stands. A scheduled run also picks up anything waiting at <code>GET /v1/attestations/pending</code>.</p>
 
       <h2 id="payment">Clear a payment</h2>
-      <p>The account's <code>isValidSignature</code> only accepts the agent key's signature plus verifier signatures over the exact EIP-3009 payment. To pay, your x402 signer calls <code>POST /v1/clear/payment</code> with the authorization, then appends the returned signatures to the agent's own. See <code>apps/agent/src/agent.ts</code>.</p>
+      <p>The account's <code>isValidSignature</code> only accepts the agent key's signature plus verifier signatures over the exact EIP-3009 payment. To pay, your x402 signer calls <code>POST /v1/clear/payment</code> with the authorization and the agent key's signature, then appends the returned signatures to the agent's own. See <code>apps/agent/src/agent.ts</code>.</p>
 
       <h2 id="public">Public endpoints</h2>
       <table>
@@ -99,6 +99,8 @@ pnpm start</code></pre>
           <tr><td><code>clearance.maxImpactBps</code></td><td>Largest price impact. Bigger trades are reduced.</td></tr>
           <tr><td><code>clearance.requiredVerifiers</code></td><td>Signatures needed. It can raise the contract's floor, not lower it.</td></tr>
           <tr><td><code>clearance.allowedTokens</code></td><td>Comma-separated token addresses.</td></tr>
+          <tr><td><code>clearance.allowedPools</code></td><td>Comma-separated pool ids you trust. Others get refused, whatever price they show.</td></tr>
+          <tr><td><code>clearance.dailyPaymentUsd</code></td><td>The most the agent can pay in a day, across all payees.</td></tr>
           <tr><td><code>clearance.maxPaymentUsd</code></td><td>Largest single x402 payment.</td></tr>
           <tr><td><code>clearance.allowedPayees</code></td><td>Comma-separated payee addresses.</td></tr>
           <tr><td><code>clearance.ownerSub</code></td><td>The owner's World ID subject, so only they can approve.</td></tr>
@@ -116,7 +118,7 @@ pnpm start</code></pre>
           <tr><td><code>429</code></td><td>The key's monthly checks are used up, or you sent too many requests.</td></tr>
         </tbody>
       </table>
-      <p>A refusal on the chain has a named reason, wrapped by the PoolManager: <code>NoClearance</code>, <code>RouterNotAllowed</code>, <code>WrongAgent</code>, <code>WrongPool</code>, <code>WrongDirection</code>, <code>WrongChain</code>, <code>ClearanceExpired</code>, <code>ExactOutputNotClearable</code>, <code>AmountAboveClearance</code>, <code>NonceUsed</code>, <code>NoQuorum</code> or <code>NotAttested</code>.</p>
+      <p>A refusal on the chain has a named reason, wrapped by the PoolManager: <code>NoClearance</code>, <code>RouterNotAllowed</code>, <code>WrongAgent</code>, <code>WrongPool</code>, <code>WrongDirection</code>, <code>WrongChain</code>, <code>ClearanceExpired</code>, <code>ExactOutputNotClearable</code>, <code>AmountAboveClearance</code>, <code>NonceUsed</code>, <code>NoQuorum</code> or <code>NotAttested</code>. The wallet adds <code>PoolNotCleared</code>, <code>SpendCapExceeded</code>, <code>TooFewSignatures</code> and <code>NotAgent</code>.</p>
 
       <h2 id="contracts">Contracts</h2>
       <table>

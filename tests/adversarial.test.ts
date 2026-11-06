@@ -1,6 +1,8 @@
+import { LocalAttestor } from "@clearance/api";
 import { mockOwner } from "@clearance/agent";
 import {
   RECORD_KEYS,
+  accountAbi,
   actionHash,
   agentNode,
   approvalNonce,
@@ -9,6 +11,7 @@ import {
   resolverAbi,
   swapClearanceDomain,
   swapClearanceTypes,
+  transferAuthorizationDigest,
   verifierSetAbi,
   checkHumanApproval,
   WORLD_ACR,
@@ -18,13 +21,26 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { SignJWT, generateKeyPair } from "jose";
 import { createHash, randomBytes } from "node:crypto";
-import { createWalletClient, hashTypedData, http, parseUnits, type Hex } from "viem";
+import { createWalletClient, hashTypedData, http, parseAbi, parseUnits, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACCOUNTS, testKey } from "../scripts/local";
 import { ADMIN_TOKEN, startHarness, type Harness } from "./harness";
 
 const usdc = (n: string) => parseUnits(n, 6);
+
+function attestorWallet(h: Harness) {
+  return createWalletClient({
+    account: privateKeyToAccount(testKey(ACCOUNTS.attestor)),
+    chain: {
+      id: h.deployment.chainId,
+      name: "anvil",
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: [h.rpcUrl] } },
+    },
+    transport: http(h.rpcUrl),
+  });
+}
 
 function ownerWallet(h: Harness) {
   return createWalletClient({
@@ -71,6 +87,7 @@ describe("against a live local system", () => {
       poolId: poolId(h.deployment.wethPool),
       zeroForOne: true,
       maxAmountIn: 5n,
+      minAmountOut: 4n,
       expiry: 6n,
       chainId: BigInt(h.deployment.chainId),
       nonce: 7n,
@@ -142,6 +159,79 @@ describe("against a live local system", () => {
     }
   });
 
+  it("splitting a large trade stops at the wallet's daily cap", async () => {
+    const wallet = ownerWallet(h);
+    const capAbi = parseAbi(["function setSpendCap(address token, uint256 cap)"]);
+    const setCap = async (amount: bigint) =>
+      h.ctx.agent.client.waitForTransactionReceipt({
+        hash: await wallet.writeContract({ address: h.deployment.account, abi: capAbi, functionName: "setSpendCap", args: [h.deployment.usdc, amount] }),
+      });
+    const remaining = await h.ctx.agent.client.readContract({ address: h.deployment.account, abi: accountAbi, functionName: "spendRemaining", args: [h.deployment.usdc] });
+    const spent = usdc("40000") - remaining;
+    await setCap(spent + usdc("150"));
+    try {
+      const { pool, zeroForOne } = wethSwap(h, usdc("100"));
+      const first = await h.ctx.agent.clearSwap(wethSwap(h, usdc("100")).action);
+      expect((await h.ctx.agent.swap(pool, zeroForOne, usdc("100"), first.hookData)).status).toBe("executed");
+
+      const second = await h.ctx.agent.clearSwap(wethSwap(h, usdc("100")).action);
+      expect(second.verdict).toBe("REDUCE");
+      expect(second.clearance?.maxAmountIn).toBe(usdc("50").toString());
+      const tooMuch = await h.ctx.agent.swap(pool, zeroForOne, usdc("100"), second.hookData);
+      expect(tooMuch).toMatchObject({ status: "reverted", reason: "SpendCapExceeded" });
+      expect((await h.ctx.agent.swap(pool, zeroForOne, usdc("50"), second.hookData)).status).toBe("executed");
+
+      const third = await h.ctx.agent.clearSwap(wethSwap(h, usdc("100")).action);
+      expect(third.verdict).toBe("BLOCK");
+      expect(third.evaluations[0]?.reasons.map((r) => r.code)).toContain("spend_cap_reached");
+    } finally {
+      await setCap(usdc("40000"));
+    }
+  });
+
+  it("a clearance carries a minimum output the wallet enforces", async () => {
+    const decision = await h.ctx.agent.clearSwap(wethSwap(h, usdc("30")).action);
+    expect(BigInt(decision.clearance!.minAmountOut)).toBeGreaterThan(0n);
+    for (const e of decision.evaluations) expect(BigInt(e.minAmountOut)).toBeGreaterThan(0n);
+  });
+
+  it("a payment request not signed by the agent key is refused before any work", async () => {
+    const authorization = {
+      from: h.deployment.account,
+      to: h.deployment.treasury,
+      value: "10000",
+      validAfter: "0",
+      validBefore: String(Math.floor(Date.now() / 1000) + 60),
+      nonce: `0x${randomBytes(32).toString("hex")}`,
+    };
+    const stranger = privateKeyToAccount(testKey(ACCOUNTS.thief));
+    const digest = transferAuthorizationDigest(h.deployment.chainId, h.deployment.usdc, "USDC", "2", authorization as never);
+    const response = await fetch(`${h.apiUrl}/v1/clear/payment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: { kind: "payment", agentName: h.deployment.agentName, account: h.deployment.account, token: h.deployment.usdc, tokenName: "USDC", tokenVersion: "2", authorization },
+        agentSignature: await stranger.sign({ hash: digest }),
+      }),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it("an attestation is refused when the digest isn't the clearance's", async () => {
+    const decision = await h.ctx.agent.clearSwap(wethSwap(h, usdc("1")).action);
+    const record = decision.clearance! as never;
+    const attestor = new LocalAttestor(h.ctx.agent.client as never, attestorWallet(h), h.deployment);
+    const outcome = await attestor.attest({
+      decisionId: "forged",
+      digest: `0x${randomBytes(32).toString("hex")}`,
+      action: wethSwap(h, usdc("1")).action,
+      clearance: record,
+      signatures: [],
+    });
+    expect(outcome.status).toBe("refused");
+    expect(outcome.problems.join()).toMatch(/digest/);
+  });
+
   it("a verifier won't sign what it didn't evaluate", async () => {
     const verifier = h.verifiers[0]!;
     const { action } = wethSwap(h, usdc("11"));
@@ -150,6 +240,7 @@ describe("against a live local system", () => {
         kind: "swap",
         action,
         maxAmountIn: action.amountIn,
+        minAmountOut: "0",
         expiry: Math.floor(Date.now() / 1000) + 60,
         nonce: "1",
         inputsHash: `0x${"00".repeat(32)}`,
@@ -162,8 +253,9 @@ describe("against a live local system", () => {
     const { action } = wethSwap(h, usdc("12"));
     const now = Math.floor(Date.now() / 1000);
     await verifier.evaluate(action);
-    const base = { kind: "swap" as const, action, expiry: now + 60, nonce: "2", inputsHash: `0x${"00".repeat(32)}` as Hex };
+    const base = { kind: "swap" as const, action, minAmountOut: "10000000000000000000", expiry: now + 60, nonce: "2", inputsHash: `0x${"00".repeat(32)}` as Hex };
     await expect(verifier.sign({ ...base, maxAmountIn: (usdc("12") + 1n).toString() })).rejects.toThrow(/above/);
+    await expect(verifier.sign({ ...base, maxAmountIn: action.amountIn, minAmountOut: "1" })).rejects.toThrow(/minimum output/);
     await expect(verifier.sign({ ...base, maxAmountIn: action.amountIn, expiry: now + 3600 })).rejects.toThrow(/expiry/);
     await expect(verifier.sign({ ...base, maxAmountIn: action.amountIn })).rejects.toThrow(/inputs hash/);
   });

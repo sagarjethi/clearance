@@ -110,6 +110,26 @@ export const accountAbi = [
     inputs: [{ name: "digest", type: "bytes32" }],
     outputs: [{ name: "", type: "bytes32" }],
   },
+  {
+    type: "function",
+    name: "spendRemaining",
+    stateMutability: "view",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "agentKey",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  { type: "error", name: "TooFewSignatures", inputs: [{ name: "given", type: "uint256" }, { name: "required", type: "uint256" }] },
+  {
+    type: "error",
+    name: "SpendCapExceeded",
+    inputs: [{ name: "token", type: "address" }, { name: "amount", type: "uint256" }, { name: "remaining", type: "uint256" }],
+  },
   { type: "error", name: "NotOwner", inputs: [] },
   { type: "error", name: "NotAgent", inputs: [] },
   { type: "error", name: "PoolNotCleared", inputs: [{ name: "hook", type: "address" }] },
@@ -134,10 +154,11 @@ export const routerAbi = [
 ] as const;
 
 export const hookAbi = parseAbi([
-  "function clearanceDigest((address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash) c) view returns (bytes32)",
+  "function clearanceDigest((address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint256 minAmountOut,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash) c) view returns (bytes32)",
   "function nonceUsed(address,uint256) view returns (bool)",
   "function attestAbove(bytes32) view returns (uint256)",
   "error NotAttested()",
+  "error PoolCreatorNotAllowed(address creator)",
   "error NoClearance()",
   "error RouterNotAllowed(address router)",
   "error WrongAgent(address caller, address agent)",

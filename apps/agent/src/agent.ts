@@ -31,10 +31,10 @@ export type DecisionResponse = {
   requested: string;
   required: number;
   hookData?: Hex;
-  clearance?: { maxAmountIn: string; expiry: number; nonce: string };
+  clearance?: { maxAmountIn: string; minAmountOut: string; expiry: number; nonce: string };
   attestationRequired?: boolean;
   verifierSignatures?: { signer: Address; signature: Hex }[];
-  evaluations: { verifier: Address; verdict: string; maxAmount: string; reasons: { code: string; detail: string }[] }[];
+  evaluations: { verifier: Address; verdict: string; maxAmount: string; minAmountOut: string; reasons: { code: string; detail: string }[] }[];
   checkpoint?: { id: string; url: string };
   error?: string;
 };
@@ -135,11 +135,11 @@ export class Agent {
           },
           reason: "Pay for a clearance check",
         };
-        const decision = await this.clearPayment(action);
+        const agentSignature = await key.signTypedData(typed as never);
+        const decision = await this.clearPayment(action, agentSignature);
         if (decision.verdict !== "ALLOW" || !decision.verifierSignatures) {
           throw new PaymentRefused(decision);
         }
-        const agentSignature = await key.signTypedData(typed as never);
         return packPaymentSignature(agentSignature, decision.verifierSignatures);
       },
     };
@@ -173,12 +173,12 @@ export class Agent {
     return body;
   }
 
-  async clearPayment(action: PaymentAction): Promise<DecisionResponse> {
+  async clearPayment(action: PaymentAction, agentSignature: Hex): Promise<DecisionResponse> {
     return this.asJson(
       await fetch(`${this.config.apiUrl}/v1/clear/payment`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, agentSignature }),
       }),
     );
   }

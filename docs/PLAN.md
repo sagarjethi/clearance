@@ -10,7 +10,7 @@ Independent verifiers check an action, a quorum signs, and the pool and the wall
 ## Modes
 
 - **Local (default).** Plain anvil, with v4 deployed fresh and test tokens. No keys needed, and every scenario runs.
-- **Sepolia.** The same code against real v4, ENSv2, USDC, World and model providers, once keys and funds exist.
+- **Sepolia.** The same code against real v4, ENSv2, USDC, World and model providers. A fork proves v4, ENSv2 and USDC today. World, models and CRE simulation need keys.
 
 ## Build order
 
@@ -35,6 +35,8 @@ Independent verifiers check an action, a quorum signs, and the pool and the wall
 - `inputsHash` covers the action and limits, not volatile facts. Each verifier reports its own evidence hash.
 - Verifiers check the human approval's `id_token` themselves, so a compromised API can't invent an approval.
 - The Quoter is allowlisted in the hook, because its swaps always revert by design.
+- Only approved creators open pools on the hook, and the owner lists trusted pools in ENS, because pool prices value trades.
+- The wallet enforces the signed minimum output, a daily spend cap per token and the owner's signature count.
 
 ## Not built, on purpose
 

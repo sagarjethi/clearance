@@ -21,6 +21,7 @@ export type Deployment = {
   weth: Address;
   moon: Address;
   rug: Address;
+  liquidityHelper: Address;
   wethPool: PoolKey;
   moonPool: PoolKey;
   rugPool: PoolKey;

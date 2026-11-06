@@ -60,14 +60,20 @@ abstract contract Fixture is Test {
 
         bytes memory args = abi.encode(manager, verifiers, owner);
         (, bytes32 salt) =
-            HookMiner.find(address(this), uint160(Hooks.BEFORE_SWAP_FLAG), type(ClearanceHook).creationCode, args);
+            HookMiner.find(address(this), uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_INITIALIZE_FLAG), type(ClearanceHook).creationCode, args);
         hook = new ClearanceHook{salt: salt}(manager, verifiers, owner);
-        vm.prank(owner);
+        vm.startPrank(owner);
         hook.setRouter(address(router), true);
+        hook.setPoolCreator(address(this), true);
+        vm.stopPrank();
 
         usdc = new TestUSDC(address(this), 1e15);
         token = new PlainToken("Token", "TKN", address(this), 1e15);
         account = new ClearanceAccount(owner, agentKey, verifiers, router, address(hook));
+
+        vm.startPrank(owner);
+        account.setSpendCap(address(usdc), 50_000e6);
+        vm.stopPrank();
 
         clearedPool = _pool(IHooks(address(hook)));
         outsidePool = _pool(IHooks(address(0)));
@@ -102,6 +108,7 @@ abstract contract Fixture is Test {
             poolId: PoolId.unwrap(clearedPool.toId()),
             zeroForOne: _zeroForOneFromUsdc(),
             maxAmountIn: AMOUNT,
+            minAmountOut: 1,
             expiry: uint64(block.timestamp + 60),
             chainId: uint64(block.chainid),
             nonce: nonce,

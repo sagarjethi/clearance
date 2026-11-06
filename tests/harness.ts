@@ -8,11 +8,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { createPublicClient, createTestClient, createWalletClient, http } from "viem";
+import { createPublicClient, createTestClient, createWalletClient, encodeAbiParameters, http, keccak256, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ACCOUNTS, RESOLVER_SET_LATER, ROOT, V4_SEPOLIA, agentRecords, deployLocal, freePort, startAnvil, testAddress, testKey } from "../scripts/local";
 
 export const ADMIN_TOKEN = "test-admin-token";
+export const CIRCLE_USDC_SEPOLIA = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 
 export type Harness = {
   deployment: Deployment;
@@ -41,8 +42,14 @@ export async function startHarness(
     // Anvil's default accounts carry EIP-7702 code on Sepolia, which breaks ERC-1155 mints to them.
     const test = createTestClient({ mode: "anvil", transport: http(rpcUrl) });
     for (const index of Object.values(ACCOUNTS)) await test.setCode({ address: testAddress(index), bytecode: "0x" });
+    // Gives the owner real Circle USDC on the fork. FiatToken v2.2 keeps balances in the mapping at slot 9.
+    await test.setStorageAt({
+      address: CIRCLE_USDC_SEPOLIA,
+      index: keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [testAddress(ACCOUNTS.owner), 9n])),
+      value: toHex(10n ** 15n, { size: 32 }),
+    });
   }
-  deployLocal(rpcUrl, deploymentFile, options.forkUrl ? { ...V4_SEPOLIA, RESOLVER: RESOLVER_SET_LATER } : {});
+  deployLocal(rpcUrl, deploymentFile, options.forkUrl ? { ...V4_SEPOLIA, USDC: CIRCLE_USDC_SEPOLIA, RESOLVER: RESOLVER_SET_LATER } : {});
   const deployment = loadDeployment(deploymentFile);
   rmSync(deploymentFile);
 

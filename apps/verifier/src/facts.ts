@@ -1,4 +1,5 @@
 import {
+  accountAbi,
   parseLimits,
   readAgentRecords,
   poolId,
@@ -68,6 +69,12 @@ function impactBps(amountIn: bigint, amountOut: bigint, spot: { num: bigint; den
   if (ideal === 0n) throw new Error("trade is too small to price");
   if (amountOut >= ideal) return 0;
   return Number(((ideal - amountOut) * 10_000n) / ideal);
+}
+
+export function readRemainingSpend(client: PublicClient, account: Address, token: Address): Promise<Sourced<bigint>> {
+  return sourced("wallet", () =>
+    client.readContract({ address: account, abi: accountAbi, functionName: "spendRemaining", args: [token] }),
+  );
 }
 
 export type MarketFacts = {
