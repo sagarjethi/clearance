@@ -6,8 +6,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {ClearanceHook} from "./ClearanceHook.sol";
 import {ClearanceRouter} from "./ClearanceRouter.sol";
 import {VerifierSet} from "./VerifierSet.sol";
 
@@ -26,16 +28,29 @@ contract ClearanceAccount is IERC1271, EIP712 {
     VerifierSet public immutable verifiers;
     ClearanceRouter public immutable router;
 
+    uint256 public constant SPEND_WINDOW = 1 days;
+
     address public agentKey;
     mapping(address => bool) public isAllowedHook;
+    /// @notice The owner can require more signatures than the shared set does, never fewer.
+    uint256 public minSignatures;
+
+    /// @notice The most of each token the agent key can spend per window. No cap set means none at all.
+    mapping(address => uint256) public spendCap;
+    mapping(address => uint256) private spentInWindow;
+    mapping(address => uint256) private windowStart;
 
     error NotOwner();
     error NotAgent();
     error PoolNotCleared(address hook);
     error CallFailed(bytes returnData);
+    error TooFewSignatures(uint256 given, uint256 required);
+    error SpendCapExceeded(address token, uint256 amount, uint256 remaining);
 
     event AgentKeySet(address indexed agentKey);
     event AllowedHookSet(address indexed hook, bool allowed);
+    event MinSignaturesSet(uint256 minSignatures);
+    event SpendCapSet(address indexed token, uint256 cap);
     event ClearedSwap(address indexed hook, bool zeroForOne, uint256 amountIn, uint256 amountOut);
 
     modifier onlyOwner() {
@@ -67,6 +82,23 @@ contract ClearanceAccount is IERC1271, EIP712 {
         emit AllowedHookSet(hook, allowed);
     }
 
+    function setMinSignatures(uint256 minSignatures_) external onlyOwner {
+        minSignatures = minSignatures_;
+        emit MinSignaturesSet(minSignatures_);
+    }
+
+    function setSpendCap(address token, uint256 cap) external onlyOwner {
+        spendCap[token] = cap;
+        emit SpendCapSet(token, cap);
+    }
+
+    /// @notice What the agent key can still spend of `token` in the current window.
+    function spendRemaining(address token) public view returns (uint256) {
+        uint256 spent = block.timestamp >= windowStart[token] + SPEND_WINDOW ? 0 : spentInWindow[token];
+        uint256 cap = spendCap[token];
+        return spent >= cap ? 0 : cap - spent;
+    }
+
     /// @notice The owner's escape hatch. The agent key can't call this.
     function execute(address target, uint256 value, bytes calldata data) external onlyOwner returns (bytes memory) {
         (bool ok, bytes memory returnData) = target.call{value: value}(data);
@@ -74,7 +106,8 @@ contract ClearanceAccount is IERC1271, EIP712 {
         return returnData;
     }
 
-    /// @notice The only way the agent key can move funds. The hook then checks the clearance in `hookData`.
+    /// @notice The only way the agent key can move funds. The hook checks the clearance in `hookData`, and
+    /// this enforces what a hook can't: the signed minimum output, a rolling spend cap and the owner's quorum.
     function swapCleared(PoolKey calldata key, bool zeroForOne, uint128 amountIn, uint128 minOut, bytes calldata hookData)
         external
         returns (uint256 amountOut)
@@ -83,8 +116,30 @@ contract ClearanceAccount is IERC1271, EIP712 {
         if (!isAllowedHook[address(key.hooks)]) revert PoolNotCleared(address(key.hooks));
 
         IERC20 tokenIn = IERC20(Currency.unwrap(zeroForOne ? key.currency0 : key.currency1));
+
+        uint256 remaining = spendRemaining(address(tokenIn));
+        if (amountIn > remaining) revert SpendCapExceeded(address(tokenIn), amountIn, remaining);
+        if (block.timestamp >= windowStart[address(tokenIn)] + SPEND_WINDOW) {
+            windowStart[address(tokenIn)] = block.timestamp;
+            spentInWindow[address(tokenIn)] = 0;
+        }
+        spentInWindow[address(tokenIn)] += amountIn;
+
+        // Empty hookData falls through, so the hook itself reports the missing clearance.
+        uint256 floor = minOut;
+        if (hookData.length != 0) {
+            (ClearanceHook.SwapClearance memory c, bytes[] memory signatures) =
+                abi.decode(hookData, (ClearanceHook.SwapClearance, bytes[]));
+            if (signatures.length < minSignatures) revert TooFewSignatures(signatures.length, minSignatures);
+            if (c.maxAmountIn != 0) {
+                // A smaller trade than cleared has to get at least its share of the signed output.
+                uint256 signedFloor = Math.mulDiv(c.minAmountOut, amountIn, c.maxAmountIn);
+                if (signedFloor > floor) floor = signedFloor;
+            }
+        }
+
         tokenIn.forceApprove(address(router), amountIn);
-        amountOut = router.swapExactIn(key, zeroForOne, amountIn, minOut, hookData, address(this));
+        amountOut = router.swapExactIn(key, zeroForOne, amountIn, uint128(floor), hookData, address(this));
         tokenIn.forceApprove(address(router), 0);
 
         emit ClearedSwap(address(key.hooks), zeroForOne, amountIn, amountOut);
@@ -103,6 +158,7 @@ contract ClearanceAccount is IERC1271, EIP712 {
         if (err != ECDSA.RecoverError.NoError || signer != agentKey) return INVALID;
 
         uint256 count = signature.length / SIGNATURE_LENGTH - 1;
+        if (count < minSignatures) return INVALID;
         bytes[] memory verifierSignatures = new bytes[](count);
         for (uint256 i; i < count; i++) {
             uint256 start = SIGNATURE_LENGTH * (i + 1);

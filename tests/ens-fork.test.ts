@@ -26,6 +26,8 @@ describe.skipIf(!FORK_URL)("real ENSv2 contracts, on a throwaway Sepolia fork", 
   const token = "0x00000000000000000000000000000000000000a2";
   const records: RawRecords = {
     account,
+    allowedPools: "",
+    dailyPaymentUsd: "5",
     maxSizeUsd: "1000",
     humanCapUsd: "25000",
     maxImpactBps: "300",

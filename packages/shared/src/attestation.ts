@@ -37,6 +37,7 @@ export type ClearanceRecord = {
   poolId: Hex;
   zeroForOne: boolean;
   maxAmountIn: string;
+  minAmountOut: string;
   expiry: number;
   chainId: number;
   nonce: string;
@@ -50,6 +51,9 @@ export type AttestationInput = {
   limits: Limits;
   /** The chain's own answer to VerifierSet.hasQuorum for these signatures. */
   quorum: boolean;
+  /** The digest the proof claims, and the one the hook computes from this clearance. They must match. */
+  claimedDigest: Hex;
+  computedDigest: Hex;
   /** Re-quoted by the attestor at the cleared size. Undefined when the quote failed. */
   impactBps: number | undefined;
   now: number;
@@ -62,9 +66,17 @@ export type AttestationResult = { status: typeof ATTESTED | typeof REFUSED; prob
 export function evaluateAttestation(input: AttestationInput): AttestationResult {
   const { action, clearance, limits } = input;
   const problems: string[] = [];
+  if (input.claimedDigest.toLowerCase() !== input.computedDigest.toLowerCase()) {
+    problems.push("The digest isn't the one this clearance produces");
+  }
+  const id = poolId(action.pool);
+  if (!limits.allowedPools.includes(id.toLowerCase() as Hex)) problems.push("The owner hasn't approved this pool");
+  for (const token of [action.pool.currency0, action.pool.currency1]) {
+    if (!limits.allowedTokens.some((allowed) => isAddressEqual(allowed, token))) problems.push(`${token} isn't on the owner's token list`);
+  }
   if (!isAddressEqual(clearance.agent, action.account)) problems.push("Clearance agent isn't the action's account");
   if (!isAddressEqual(limits.account, action.account)) problems.push("ENS record binds this name to another account");
-  if (clearance.poolId !== poolId(action.pool)) problems.push("Clearance pool isn't the action's pool");
+  if (clearance.poolId !== id) problems.push("Clearance pool isn't the action's pool");
   if (clearance.zeroForOne !== action.zeroForOne) problems.push("Clearance direction isn't the action's direction");
   if (clearance.chainId !== input.chainId) problems.push("Clearance is for another chain");
   if (clearance.expiry <= input.now) problems.push("Clearance has expired");

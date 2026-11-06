@@ -34,15 +34,19 @@ pnpm start
 
 A hook only guards its own pool, so the smart account is the real enforcer. The hook is an opt-in safe pool.
 
+The wallet also enforces what no server can talk it out of: a signed minimum output, a rolling daily spend cap per token, and the owner's own signature count.
+Only an approved creator can open a pool on the hook, and the owner lists the pools it trusts in ENS, because a pool's own price means nothing otherwise.
+
 ## Where to look
 
 ### Uniswap v4
 
 | What | Where |
 |---|---|
-| The check on every swap | [`beforeSwap`](contracts/src/ClearanceHook.sol#L136), [`_enforce`](contracts/src/ClearanceHook.sol#L148) |
-| Who really called, through `IMsgSender` | [`ClearanceHook.sol:156`](contracts/src/ClearanceHook.sol#L156), [`ClearanceRouter.msgSender`](contracts/src/ClearanceRouter.sol#L32) |
-| Only allowed hooks, and no direct transfers | [`ClearanceAccount.swapCleared`](contracts/src/ClearanceAccount.sol#L78) |
+| The check on every swap | [`beforeSwap`](contracts/src/ClearanceHook.sol#L149), [`_enforce`](contracts/src/ClearanceHook.sol#L161) |
+| Who really called, through `IMsgSender` | [`ClearanceHook.sol:169`](contracts/src/ClearanceHook.sol#L169), [`ClearanceRouter.msgSender`](contracts/src/ClearanceRouter.sol#L32) |
+| Only allowed hooks, no direct transfers, spend cap and signed output | [`ClearanceAccount.swapCleared`](contracts/src/ClearanceAccount.sol#L111) |
+| Only approved creators can open a pool | [`beforeInitialize`](contracts/src/ClearanceHook.sol#L196) |
 | The Quoter as live market data | [`apps/verifier/src/facts.ts`](apps/verifier/src/facts.ts) |
 | Friction we hit | [`FEEDBACK.md`](FEEDBACK.md) |
 
@@ -69,17 +73,17 @@ A hook only guards its own pool, so the smart account is the real enforcer. The 
 
 | What | Where |
 |---|---|
-| The workflow | [`attestDecision`](cre/attest/attest.ts#L92) |
-| Its checks | [`evaluateAttestation`](packages/shared/src/attestation.ts#L62) |
+| The workflow | [`attestDecision`](cre/attest/attest.ts#L96) |
+| Its checks | [`evaluateAttestation`](packages/shared/src/attestation.ts#L66) |
 | Where its reports land | [`ClearanceLedger.onReport`](contracts/src/ClearanceLedger.sol) |
-| Where its reports get enforced | [`NotAttested`](contracts/src/ClearanceHook.sol#L177) |
+| Where its reports get enforced | [`NotAttested`](contracts/src/ClearanceHook.sol#L190) |
 
 ### x402
 
 | What | Where |
 |---|---|
 | Charging for a check | [`apps/api/src/x402.ts`](apps/api/src/x402.ts) |
-| A smart account paying, with verifiers inside the signature | [`Agent.paymentSigner`](apps/agent/src/agent.ts), [`isValidSignature`](contracts/src/ClearanceAccount.sol#L99) |
+| A smart account paying, with verifiers inside the signature | [`Agent.paymentSigner`](apps/agent/src/agent.ts), [`isValidSignature`](contracts/src/ClearanceAccount.sol#L154) |
 
 ## Tests
 
@@ -100,17 +104,22 @@ What's proven, and what isn't:
 | Part | Status |
 |---|---|
 | Hook, account, verifiers, API, scenarios | Tested end to end on a local chain |
-| Real v4 and ENSv2 contracts | Tested on a Sepolia fork, not yet deployed to Sepolia |
+| Real v4, ENSv2 and Circle USDC | Every scenario passes on a Sepolia fork, including the smart account's ERC-1271 payment through x402. Not yet deployed to Sepolia |
 | CRE workflow | Compiles to WASM and passes on the SDK's mock runtime. `cre workflow simulate` needs a logged-in account and hasn't run yet |
 | World ID | Runs against a local test issuer that proves nobody's humanity. Not yet run against World's sandbox |
 | Model review | Adapters tested against stub servers. Not yet run with real provider keys |
-| x402 | A real `@x402` client and facilitator on local and fork chains, with a local USDC stand-in. Launa with a smart account on real Sepolia is unproven |
+| x402 on Launa | Unproven with a smart account on real Sepolia. The fork runs use the npm reference facilitator |
+
+An independent review found a critical bug, now fixed and tested: anyone could open a pool on the hook at an absurd price, and verifiers would have trusted it.
 
 Known limits:
 
-- **No spend velocity limit.** A hijacked agent can repeat trades under the size limit until the wallet is empty, within the owner's tokens and pools. A rolling cap is the next feature to build.
+- **Attestations through a mock forwarder are not trustworthy.** `cre workflow simulate --broadcast` delivers through CRE's mock forwarder, which anyone may be able to call. For real use, deploy the workflow, point the ledger at the real forwarder and set `ATTEST_WORKFLOW_ID`.
+- **Payment budgets and used approvals live in verifier memory.** A restart forgets them. The swap spend cap is on chain and doesn't have this limit. A durable store comes next.
+- **USD values come from the owner-approved pool's own price**, so owner approval of a pool is a trust decision. An independent price oracle is the next step for mainnet.
+- **Hook attestation thresholds are in raw input units**, so selling tWETH nearly always needs an attestation. This fails closed.
 - **One agent per deployment.** The verifiers read one resolver, so more agents need their own deployment for now.
-- **The dashboard's admin token** is held by its dev server. A hosted version needs real owner sign-in first.
+- **The dashboard's admin token** is held by its dev server, which binds to localhost. A hosted version needs real owner sign-in first.
 - **GoPlus and CoinGecko aren't used**, because they have no data for Sepolia test tokens. The bytecode rule and Quoter do this job on testnet.
 - **The contracts haven't had an external audit.** Don't put real funds behind them.
 

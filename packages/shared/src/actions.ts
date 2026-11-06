@@ -81,6 +81,8 @@ export type Evaluation = {
   verdict: Verdict;
   /** The most this verifier will sign for. "0" unless the verdict is ALLOW or REDUCE. */
   maxAmount: string;
+  /** The least this verifier accepts for `maxAmount`. "0" unless the verdict is ALLOW or REDUCE. */
+  minAmountOut: string;
   reasons: Reason[];
   evidenceHash: Hex;
   review: ModelReview;

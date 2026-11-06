@@ -12,7 +12,7 @@
     "start": "tsx scripts/up.ts",
     "deploy:sepolia": "tsx scripts/sepolia.ts",
     "test:cre": "cd cre/attest && bun test",
-    "test:fork": "SEPOLIA_FORK_URL=${SEPOLIA_FORK_URL:-https://ethereum-sepolia-rpc.publicnode.com} vitest run tests/ens-fork.test.ts tests/sepolia-fork.test.ts"
+    "test:fork": "SEPOLIA_FORK_URL=${SEPOLIA_FORK_URL:-https://ethereum-sepolia-rpc.publicnode.com} vitest run --no-file-parallelism tests/ens-fork.test.ts tests/sepolia-fork.test.ts"
   },
   "devDependencies": {
     "@clearance/agent": "workspace:*",

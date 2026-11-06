@@ -2,6 +2,7 @@ import {
   ATTESTED,
   encodeAttestationReport,
   evaluateAttestation,
+  hookAbi,
   ledgerAbi,
   parseLimits,
   readAgentRecords,
@@ -78,7 +79,22 @@ export class LocalAttestor implements Attestor {
     const at = Math.floor(Date.now() / 1000);
     try {
       const limits = parseLimits(await readAgentRecords(client, deployment.resolver, request.action.agentName));
-      const [quorum, impactBps] = await Promise.all([
+      const [computedDigest, quorum, impactBps] = await Promise.all([
+        client.readContract({
+          address: deployment.hook,
+          abi: hookAbi,
+          functionName: "clearanceDigest",
+          args: [
+            {
+              ...request.clearance,
+              maxAmountIn: BigInt(request.clearance.maxAmountIn),
+              minAmountOut: BigInt(request.clearance.minAmountOut),
+              expiry: BigInt(request.clearance.expiry),
+              chainId: BigInt(request.clearance.chainId),
+              nonce: BigInt(request.clearance.nonce),
+            },
+          ],
+        }),
         client.readContract({
           address: deployment.verifierSet,
           abi: verifierSetAbi,
@@ -92,6 +108,8 @@ export class LocalAttestor implements Attestor {
         clearance: request.clearance,
         limits,
         quorum,
+        claimedDigest: request.digest,
+        computedDigest,
         impactBps,
         now: at,
         chainId: deployment.chainId,

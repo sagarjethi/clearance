@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PoolIdLibrary, PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IMsgSender} from "@uniswap/v4-periphery/src/interfaces/IMsgSender.sol";
 import {V4Quoter} from "@uniswap/v4-periphery/src/lens/V4Quoter.sol";
@@ -185,5 +188,26 @@ contract ClearanceHookTest is Fixture {
         (uint256 out,) = quoter.quoteExactInputSingle(params);
         assertGt(out, 0);
         assertEq(usdc.balanceOf(address(manager)), usdcBefore);
+    }
+
+    function test_strangerCantOpenAPoolOnTheHook() public {
+        PoolKey memory key = PoolKey(clearedPool.currency0, clearedPool.currency1, 500, 10, clearedPool.hooks);
+        vm.prank(attacker);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(ClearanceHook.PoolCreatorNotAllowed.selector, attacker),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        manager.initialize(key, SQRT_PRICE_1_1);
+    }
+
+    function test_ownerCanOpenAPool() public {
+        PoolKey memory key = PoolKey(clearedPool.currency0, clearedPool.currency1, 500, 10, clearedPool.hooks);
+        vm.prank(owner);
+        manager.initialize(key, SQRT_PRICE_1_1);
     }
 }

@@ -10,13 +10,19 @@ import { parseLimits, type RawRecords } from "../../packages/shared/src/limits";
 import type { SwapAction } from "../../packages/shared/src/actions";
 
 const ACCOUNT = "0x00000000000000000000000000000000000000a1" as const;
+const CURRENCY0 = "0x00000000000000000000000000000000000000c1" as const;
+const CURRENCY1 = "0x00000000000000000000000000000000000000c2" as const;
+const POOL_KEY = { currency0: CURRENCY0, currency1: CURRENCY1, fee: 3000, tickSpacing: 60, hooks: "0x00000000000000000000000000000000000000c3" as const };
+const DIGEST = `0x${"ab".repeat(32)}` as const;
 const records: RawRecords = {
   account: ACCOUNT,
+  allowedPools: poolId(POOL_KEY),
+  dailyPaymentUsd: "5",
   maxSizeUsd: "1000",
   humanCapUsd: "25000",
   maxImpactBps: "300",
   requiredVerifiers: "2",
-  allowedTokens: "",
+  allowedTokens: `${CURRENCY0},${CURRENCY1}`,
   maxPaymentUsd: "1",
   allowedPayees: "",
   ownerSub: "owner",
@@ -30,6 +36,7 @@ const config: Config = {
   chainId: 11155111,
   gasLimit: "500000",
   resolver: "0x00000000000000000000000000000000000000b1",
+  hook: "0x00000000000000000000000000000000000000b6",
   verifierSet: "0x00000000000000000000000000000000000000b2",
   quoter: "0x00000000000000000000000000000000000000b3",
   stateView: "0x00000000000000000000000000000000000000b4",
@@ -40,13 +47,7 @@ const action: SwapAction = {
   kind: "swap",
   agentName: "alice.agents.clearance.eth",
   account: ACCOUNT,
-  pool: {
-    currency0: "0x00000000000000000000000000000000000000c1",
-    currency1: "0x00000000000000000000000000000000000000c2",
-    fee: 3000,
-    tickSpacing: 60,
-    hooks: "0x00000000000000000000000000000000000000c3",
-  },
+  pool: POOL_KEY,
   zeroForOne: true,
   amountIn: "1000000",
 };
@@ -55,13 +56,14 @@ function proofFor(overrides: Record<string, unknown> = {}) {
   return {
     id: "d1",
     action,
-    digest: `0x${"ab".repeat(32)}`,
+    digest: DIGEST,
     signatures: [`0x${"11".repeat(65)}`, `0x${"22".repeat(65)}`],
     clearance: {
       agent: ACCOUNT,
       poolId: poolId(action.pool),
       zeroForOne: true,
       maxAmountIn: "1000000",
+      minAmountOut: "985000",
       expiry: Math.floor(Date.now() / 1000) + 60,
       chainId: 11155111,
       nonce: "1",
@@ -71,8 +73,14 @@ function proofFor(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function proofWithLimits(raw: RawRecords) {
+  const proof = proofFor();
+  return { ...proof, clearance: { ...proof.clearance, inputsHash: inputsHash(action, parseLimits(raw)) } };
+}
+
 const allAbi = parseAbi([
   "function resolve(bytes name, bytes data) view returns (bytes)",
+  "function clearanceDigest((address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint256 minAmountOut,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash) c) view returns (bytes32)",
   "function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)",
   "function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)",
   "struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }",
@@ -80,7 +88,7 @@ const allAbi = parseAbi([
   "function quoteExactInputSingle(QuoteExactSingleParams params) returns (uint256 amountOut, uint256 gasEstimate)",
 ]);
 
-type World = { quorum?: boolean; quoteOut?: bigint; quoteFails?: boolean; records?: RawRecords; proof?: unknown; pending?: string[] };
+type World = { computedDigest?: Hex; quorum?: boolean; quoteOut?: bigint; quoteFails?: boolean; records?: RawRecords; proof?: unknown; pending?: string[] };
 
 function setup(world: World) {
   const selector = getNetwork({ chainFamily: "evm", chainSelectorName: config.chainSelectorName, isTestnet: true })!.chainSelector.selector;
@@ -100,6 +108,8 @@ function setup(world: World) {
         functionName: "resolve",
         result: encodeFunctionResult({ abi: resolveAbi, functionName: "text", result: value }),
       });
+    } else if (decoded.functionName === "clearanceDigest") {
+      result = encodeFunctionResult({ abi: allAbi, functionName: "clearanceDigest", result: world.computedDigest ?? DIGEST });
     } else if (decoded.functionName === "hasQuorum") {
       result = encodeFunctionResult({ abi: allAbi, functionName: "hasQuorum", result: world.quorum ?? true });
     } else if (decoded.functionName === "getSlot0") {
@@ -140,6 +150,22 @@ describe("attest workflow", () => {
     expect(attestDecision(runtime, "d1")).toBe(`0x${"cd".repeat(32)}`);
     expect(statusOf(m.written()!)).toBe(1);
     expect(m.receiver()!.toLowerCase()).toBe(config.ledger.toLowerCase());
+  });
+
+  test("refuses when the proof's digest isn't this clearance's digest", () => {
+    const m = setup({ computedDigest: `0x${"ee".repeat(32)}` });
+    const runtime = newTestRuntime({ config } as never) as any;
+    runtime.config = config;
+    attestDecision(runtime, "d1");
+    expect(statusOf(m.written()!)).toBe(2);
+  });
+
+  test("refuses a pool the owner hasn't approved", () => {
+    const m = setup({ records: { ...records, allowedPools: "" }, proof: proofWithLimits({ ...records, allowedPools: "" }) });
+    const runtime = newTestRuntime({ config } as never) as any;
+    runtime.config = config;
+    attestDecision(runtime, "d1");
+    expect(statusOf(m.written()!)).toBe(2);
   });
 
   test("refuses when the chain says there is no quorum", () => {

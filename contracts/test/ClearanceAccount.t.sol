@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {ClearanceAccount} from "../src/ClearanceAccount.sol";
+import {ClearanceHook} from "../src/ClearanceHook.sol";
 import {TestUSDC} from "../src/test-support/TestUSDC.sol";
 import {RugToken} from "../src/test-support/TestTokens.sol";
 import {Fixture} from "./Fixture.sol";
@@ -132,5 +133,83 @@ contract ClearanceAccountTest is Fixture {
 
         vm.expectRevert(TestUSDC.InvalidAuthorization.selector);
         usdc.transferWithAuthorization(address(account), payee, 10_000, 0, validBefore, nonce, abi.encodePacked(r, s, v));
+    }
+
+    function test_signedMinimumOutputIsEnforced() public {
+        ClearanceHook.SwapClearance memory c = _clearance(1);
+        c.minAmountOut = AMOUNT;
+        bytes memory data = _hookData(c);
+        vm.expectRevert();
+        _swapAsAccount(data);
+        assertEq(usdc.balanceOf(address(account)), 100_000e6);
+    }
+
+    function test_agentCantLowerTheSignedMinimum() public {
+        ClearanceHook.SwapClearance memory c = _clearance(1);
+        bytes[] memory signatures = _sign(hook.clearanceDigest(c), _quorum());
+        c.minAmountOut = 0;
+        _expectHookRevert(abi.encodeWithSelector(ClearanceHook.NoQuorum.selector));
+        _swapAsAccount(abi.encode(c, signatures));
+    }
+
+    function test_smallerTradeGetsItsShareOfTheFloor() public {
+        ClearanceHook.SwapClearance memory c = _clearance(1);
+        c.maxAmountIn = AMOUNT * 2;
+        c.minAmountOut = AMOUNT * 2 - AMOUNT / 10;
+        // Half the cleared size with 5% slippage allowed still passes in this deep pool.
+        assertGt(_swapAsAccount(_hookData(c)), 0);
+    }
+
+    function test_spendCapStopsSplitting() public {
+        vm.prank(owner);
+        account.setSpendCap(address(usdc), AMOUNT + AMOUNT / 2);
+        _swapAsAccount(_hookData(_clearance(1)));
+        assertEq(account.spendRemaining(address(usdc)), AMOUNT / 2);
+
+        bytes memory data = _hookData(_clearance(2));
+        vm.expectRevert(abi.encodeWithSelector(ClearanceAccount.SpendCapExceeded.selector, address(usdc), AMOUNT, AMOUNT / 2));
+        _swapAsAccount(data);
+    }
+
+    function test_spendCapResetsAfterTheWindow() public {
+        vm.prank(owner);
+        account.setSpendCap(address(usdc), AMOUNT);
+        _swapAsAccount(_hookData(_clearance(1)));
+        assertEq(account.spendRemaining(address(usdc)), 0);
+        vm.warp(block.timestamp + 1 days);
+        assertEq(account.spendRemaining(address(usdc)), AMOUNT);
+        assertGt(_swapAsAccount(_hookData(_clearance(2))), 0);
+    }
+
+    function test_tokenWithNoCapCantBeSpent() public {
+        vm.prank(owner);
+        account.setSpendCap(address(usdc), 0);
+        bytes memory data = _hookData(_clearance(1));
+        vm.expectRevert(abi.encodeWithSelector(ClearanceAccount.SpendCapExceeded.selector, address(usdc), AMOUNT, 0));
+        _swapAsAccount(data);
+    }
+
+    function test_ownersQuorumAppliesToSwaps() public {
+        vm.prank(owner);
+        account.setMinSignatures(3);
+        bytes memory data = _hookData(_clearance(1));
+        vm.expectRevert(abi.encodeWithSelector(ClearanceAccount.TooFewSignatures.selector, 2, 3));
+        _swapAsAccount(data);
+    }
+
+    function test_ownersQuorumAppliesToPayments() public {
+        vm.prank(owner);
+        account.setMinSignatures(3);
+        bytes32 digest = keccak256("anything");
+        assertEq(account.isValidSignature(digest, _packed(digest, agentPk, _quorum())), INVALID);
+    }
+
+    function test_onlyOwnerSetsCapsAndQuorum() public {
+        vm.startPrank(agentKey);
+        vm.expectRevert(ClearanceAccount.NotOwner.selector);
+        account.setSpendCap(address(usdc), type(uint256).max);
+        vm.expectRevert(ClearanceAccount.NotOwner.selector);
+        account.setMinSignatures(0);
+        vm.stopPrank();
     }
 }

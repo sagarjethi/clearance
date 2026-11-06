@@ -45,6 +45,8 @@ export type AgentInfo = {
     maxImpactBps: number;
     requiredVerifiers: number;
     allowedTokens: string[];
+    allowedPools: string[];
+    dailyPaymentUsd: number;
     maxPaymentUsd: number;
     allowedPayees: string[];
     ownerSub: string;
