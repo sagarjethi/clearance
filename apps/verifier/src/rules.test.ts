@@ -1,7 +1,7 @@
 import type { Limits } from "@clearance/shared";
 import { describe, expect, it } from "vitest";
 import { getAddress, type Address } from "viem";
-import { scanHazards } from "./facts";
+import { scanHazards } from "@clearance/shared";
 import { applyReview } from "./review";
 import { evaluatePayment, evaluateSwap, type PaymentFacts, type Sourced, type SwapFacts } from "./rules";
 
@@ -12,7 +12,9 @@ const HOOK = a(9);
 const PAYEE = a(7);
 const NOW = 1_800_000_000;
 
+const ACCOUNT = a(5);
 const limits: Limits = {
+  account: ACCOUNT,
   maxSizeUsd: 1000,
   humanCapUsd: 25000,
   maxImpactBps: 300,
@@ -27,6 +29,7 @@ const ok = <T>(value: T, fetchedAt = NOW): Sourced<T> => ({ value, source: "test
 
 function swapFacts(overrides: Partial<SwapFacts> = {}): SwapFacts {
   return {
+    account: ACCOUNT,
     limits: ok(limits),
     allowedHook: HOOK,
     poolHook: HOOK,
@@ -91,6 +94,10 @@ describe("swap rules", () => {
     expect(codes(evaluateSwap(swapFacts({ poolHook: a(0) }), NOW))).toEqual(["pool_not_guarded"]);
   });
 
+  it("blocks a wallet the name's record doesn't bind", () => {
+    expect(codes(evaluateSwap(swapFacts({ account: a(6) }), NOW))).toEqual(["account_not_bound"]);
+  });
+
   it("blocks a zero amount", () => {
     expect(codes(evaluateSwap(swapFacts({ amountIn: 0n }), NOW))).toContain("invalid_amount");
   });
@@ -141,6 +148,7 @@ describe("swap rules", () => {
 
 describe("payment rules", () => {
   const facts = (overrides: Partial<PaymentFacts> = {}): PaymentFacts => ({
+    account: ACCOUNT,
     limits: ok(limits),
     payee: PAYEE,
     token: USDC,
@@ -153,6 +161,9 @@ describe("payment rules", () => {
 
   it("allows a listed payee within the limit", () => {
     expect(evaluatePayment(facts(), 500000n).verdict).toBe("ALLOW");
+  });
+  it("blocks a wallet the name's record doesn't bind", () => {
+    expect(codes(evaluatePayment(facts({ account: a(6) }), 1n))).toEqual(["account_not_bound"]);
   });
   it("blocks an unlisted payee", () => {
     expect(codes(evaluatePayment(facts({ payee: a(8) }), 1n))).toEqual(["payee_not_allowed"]);

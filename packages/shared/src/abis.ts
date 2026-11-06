@@ -18,6 +18,7 @@ export const verifierSetAbi = parseAbi([
   "function verifierCount() view returns (uint256)",
   "function isVerifier(address) view returns (bool)",
   "function removeVerifier(address)",
+  "function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)",
 ]);
 
 export const stateViewAbi = parseAbi([
@@ -135,6 +136,8 @@ export const routerAbi = [
 export const hookAbi = parseAbi([
   "function clearanceDigest((address agent,bytes32 poolId,bool zeroForOne,uint256 maxAmountIn,uint64 expiry,uint64 chainId,uint256 nonce,bytes32 inputsHash) c) view returns (bytes32)",
   "function nonceUsed(address,uint256) view returns (bool)",
+  "function attestAbove(bytes32) view returns (uint256)",
+  "error NotAttested()",
   "error NoClearance()",
   "error RouterNotAllowed(address router)",
   "error WrongAgent(address caller, address agent)",

@@ -13,6 +13,7 @@ export type TokenFacts = {
 };
 
 export type SwapFacts = {
+  account: Address;
   limits: Sourced<Limits>;
   allowedHook: Address;
   poolHook: Address;
@@ -32,6 +33,7 @@ export type SwapFacts = {
 };
 
 export type PaymentFacts = {
+  account: Address;
   limits: Sourced<Limits>;
   payee: Address;
   token: Address;
@@ -81,6 +83,14 @@ export function evaluateSwap(f: SwapFacts, now: number): RuleResult {
     return blocked(reasons);
   }
 
+  if (limits.account !== f.account) {
+    reasons.push({
+      code: "account_not_bound",
+      severity: "block",
+      detail: `This name's ENS record binds it to ${limits.account}, not this wallet`,
+      source: "ens",
+    });
+  }
   if (f.amountIn <= 0n) {
     reasons.push({ code: "invalid_amount", severity: "block", detail: "Amount must be above zero" });
   }
@@ -165,6 +175,14 @@ export function evaluatePayment(f: PaymentFacts, value: bigint): RuleResult {
   const limits = fresh(f.limits, f.now, "owner limits", reasons);
   if (!limits) return blocked(reasons);
 
+  if (limits.account !== f.account) {
+    reasons.push({
+      code: "account_not_bound",
+      severity: "block",
+      detail: `This name's ENS record binds it to ${limits.account}, not this wallet`,
+      source: "ens",
+    });
+  }
   if (!f.stableTokens.includes(f.token)) {
     reasons.push({ code: "payment_token_not_allowed", severity: "block", detail: `${f.token} isn't a payment token` });
   }

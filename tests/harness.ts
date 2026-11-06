@@ -1,4 +1,4 @@
-import { apiApp, HumanGate, Store, x402Paywall } from "@clearance/api";
+import { LocalAttestor, apiApp, HumanGate, Store, x402Paywall, scanTokenFor } from "@clearance/api";
 import { Agent, mockOwner, type ScenarioContext } from "@clearance/agent";
 import { mockWorldApp, TEST_ACR } from "@clearance/mock-world";
 import { WORLD_ACR, loadDeployment, type Deployment } from "@clearance/shared";
@@ -10,6 +10,8 @@ import { join, resolve } from "node:path";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ACCOUNTS, ROOT, deployLocal, freePort, startAnvil, testAddress, testKey } from "../scripts/local";
+
+export const ADMIN_TOKEN = "test-admin-token";
 
 export type Harness = {
   deployment: Deployment;
@@ -104,6 +106,13 @@ export async function startHarness(options: { review?: ReviewConfig[]; deadVerif
     paywall,
     publicUrl: apiUrl,
     reportToken: "test-token",
+    adminToken: ADMIN_TOKEN,
+    attestor: new LocalAttestor(
+      client as never,
+      createWalletClient({ account: privateKeyToAccount(testKey(ACCOUNTS.attestor)), chain, transport: http(rpcUrl) }),
+      deployment,
+    ),
+    scanToken: (address) => scanTokenFor(client as never, address),
     localOwnerWallet: createWalletClient({ account: privateKeyToAccount(testKey(ACCOUNTS.owner)), chain, transport: http(rpcUrl) }),
   });
   servers.push(await listen(app.fetch, apiPort));

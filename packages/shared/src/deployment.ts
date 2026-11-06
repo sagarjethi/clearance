@@ -15,6 +15,7 @@ export type Deployment = {
   verifierSet: Address;
   router: Address;
   hook: Address;
+  ledger: Address;
   account: Address;
   resolver: Address;
   weth: Address;

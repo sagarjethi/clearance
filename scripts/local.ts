@@ -19,7 +19,7 @@ export function testAddress(index: number) {
   return mnemonicToAccount(MNEMONIC, { addressIndex: index }).address;
 }
 
-export const ACCOUNTS = { owner: 0, agent: 1, thief: 2, verifier1: 3, verifier2: 4, verifier3: 5, facilitator: 6, treasury: 7, evilPayee: 8 };
+export const ACCOUNTS = { owner: 0, agent: 1, thief: 2, verifier1: 3, verifier2: 4, verifier3: 5, facilitator: 6, treasury: 7, evilPayee: 8, attestor: 9 };
 
 export async function freePort(): Promise<number> {
   return new Promise((done, fail) => {
@@ -71,6 +71,7 @@ export function deployLocal(rpcUrl: string, deploymentFile: string) {
       AGENT_KEY_ADDRESS: testAddress(ACCOUNTS.agent),
       VERIFIER_ADDRESSES: [ACCOUNTS.verifier1, ACCOUNTS.verifier2, ACCOUNTS.verifier3].map(testAddress).join(","),
       TREASURY_ADDRESS: testAddress(ACCOUNTS.treasury),
+      ATTEST_FORWARDER: testAddress(ACCOUNTS.attestor),
       DEPLOYMENT_FILE: deploymentFile,
     },
   });

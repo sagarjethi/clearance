@@ -12,6 +12,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IMsgSender} from "@uniswap/v4-periphery/src/interfaces/IMsgSender.sol";
+import {ClearanceLedger} from "./ClearanceLedger.sol";
 import {VerifierSet} from "./VerifierSet.sol";
 
 /// @notice A v4 hook for opt-in safe pools: no swap happens without a quorum-signed clearance.
@@ -41,6 +42,10 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     /// @dev Quoters revert every swap they make by design, so letting them through can't move funds.
     mapping(address => bool) public isQuoter;
     mapping(address => mapping(uint256 => bool)) public nonceUsed;
+    /// @notice Independent checks live here. Unset means no clearance needs one.
+    ClearanceLedger public ledger;
+    /// @notice Above this cleared input amount, a pool also needs a ledger attestation. Zero means never.
+    mapping(bytes32 => uint256) public attestAbove;
 
     error NotPoolManager();
     error HookNotImplemented();
@@ -55,9 +60,12 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     error AmountAboveClearance(uint256 amountIn, uint256 maxAmountIn);
     error NonceUsed(uint256 nonce);
     error NoQuorum();
+    error NotAttested();
 
     event RouterSet(address indexed router, bool allowed);
     event QuoterSet(address indexed quoter, bool allowed);
+    event LedgerSet(address indexed ledger);
+    event AttestAboveSet(bytes32 indexed poolId, uint256 amount);
     event SwapCleared(address indexed agent, bytes32 indexed poolId, uint256 nonce, uint256 amountIn, bytes32 inputsHash);
 
     constructor(IPoolManager poolManager_, VerifierSet verifiers_, address owner_)
@@ -95,6 +103,16 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
     function setQuoter(address quoter, bool allowed) external onlyOwner {
         isQuoter[quoter] = allowed;
         emit QuoterSet(quoter, allowed);
+    }
+
+    function setLedger(ClearanceLedger ledger_) external onlyOwner {
+        ledger = ledger_;
+        emit LedgerSet(address(ledger_));
+    }
+
+    function setAttestAbove(bytes32 poolId, uint256 amount) external onlyOwner {
+        attestAbove[poolId] = amount;
+        emit AttestAboveSet(poolId, amount);
     }
 
     function clearanceDigest(SwapClearance memory c) public view returns (bytes32) {
@@ -151,7 +169,13 @@ contract ClearanceHook is IHooks, EIP712, Ownable {
         if (nonceUsed[c.agent][c.nonce]) revert NonceUsed(c.nonce);
         nonceUsed[c.agent][c.nonce] = true;
 
-        if (!verifiers.hasQuorum(clearanceDigest(c), signatures)) revert NoQuorum();
+        bytes32 digest = clearanceDigest(c);
+        if (!verifiers.hasQuorum(digest, signatures)) revert NoQuorum();
+
+        uint256 threshold = attestAbove[c.poolId];
+        if (threshold != 0 && c.maxAmountIn > threshold) {
+            if (address(ledger) == address(0) || !ledger.isAttested(digest)) revert NotAttested();
+        }
 
         emit SwapCleared(c.agent, c.poolId, c.nonce, amountIn, c.inputsHash);
     }

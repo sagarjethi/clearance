@@ -209,6 +209,18 @@ export const scenarios: Scenario[] = [
 
       const cleared = await ctx.agent.clearSwap(action, decision.checkpoint!.id);
       await check({ label: "Verifiers now sign", pass: cleared.verdict === "ALLOW", detail: cleared.verdict });
+      const early = await ctx.agent.swap(pool, zeroForOne, amount, cleared.hookData);
+      await check({
+        label: "Before the independent check, the hook still refuses",
+        pass: Boolean(cleared.attestationRequired) && early.status === "reverted" && early.reason === "NotAttested",
+        detail: txDetail(early),
+      });
+      const attested = await ctx.agent.attest(cleared.id);
+      await check({
+        label: "The independent check re-derives limits and market, then attests on the ledger",
+        pass: attested.status === "attested",
+        detail: `${attested.status} by ${attested.mode}. ${attested.problems.join("; ")}`,
+      });
       const tx = await ctx.agent.swap(pool, zeroForOne, amount, cleared.hookData);
       await check({ label: "The trade executes", pass: tx.status === "executed", detail: txDetail(tx) });
 

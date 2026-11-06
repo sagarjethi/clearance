@@ -1,6 +1,7 @@
 import { getAddress, isAddress, namehash, type Address, type Hex } from "viem";
 
 export const RECORD_KEYS = {
+  account: "clearance.account",
   maxSizeUsd: "clearance.maxSizeUsd",
   humanCapUsd: "clearance.humanCapUsd",
   maxImpactBps: "clearance.maxImpactBps",
@@ -11,9 +12,8 @@ export const RECORD_KEYS = {
   ownerSub: "clearance.ownerSub",
 } as const;
 
-export const SCORE_KEY = "clearance.score";
-
 export type Limits = {
+  account: Address;
   maxSizeUsd: number;
   humanCapUsd: number;
   maxImpactBps: number;
@@ -49,7 +49,9 @@ export function parseLimits(raw: RawRecords): Limits {
   if (!Number.isInteger(requiredVerifiers) || requiredVerifiers < 1) {
     throw new LimitsError("requiredVerifiers must be a whole number of at least 1");
   }
+  if (!isAddress(raw.account)) throw new LimitsError("account is missing or invalid");
   return {
+    account: getAddress(raw.account),
     maxSizeUsd: positiveNumber("maxSizeUsd", raw.maxSizeUsd),
     humanCapUsd: positiveNumber("humanCapUsd", raw.humanCapUsd),
     maxImpactBps: positiveNumber("maxImpactBps", raw.maxImpactBps),

@@ -1,5 +1,6 @@
 import {
   encodeHookData,
+  hookAbi,
   actionHash,
   inputsHash,
   poolId,
@@ -39,6 +40,8 @@ export type Decision = {
   verifierSignatures?: SignedBy[];
   hookData?: Hex;
   decidedAt: number;
+  digest?: Hex;
+  attestationRequired?: boolean;
 };
 
 const CLEARANCE_SECONDS = 90;
@@ -48,6 +51,7 @@ export type CoordinatorConfig = {
   client: PublicClient;
   chainId: number;
   verifierSet: Address;
+  hook: Address;
   readLimits: (name: string) => Promise<Limits | undefined>;
   timeoutMs?: number;
 };
@@ -158,9 +162,15 @@ export class Coordinator {
       inputsHash: hash,
     };
     const signatures = sortBySigner(signed);
+    const [digest, attestAbove] = await Promise.all([
+      this.config.client.readContract({ address: this.config.hook, abi: hookAbi, functionName: "clearanceDigest", args: [clearance] }),
+      this.config.client.readContract({ address: this.config.hook, abi: hookAbi, functionName: "attestAbove", args: [clearance.poolId] }),
+    ]);
     return {
       ...base,
       verdict,
+      digest,
+      attestationRequired: attestAbove !== 0n && maxAmountIn > attestAbove,
       clearance: {
         agent: action.account,
         poolId: clearance.poolId,

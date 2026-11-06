@@ -22,7 +22,7 @@ import { createWalletClient, hashTypedData, http, parseUnits, type Hex } from "v
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACCOUNTS, testKey } from "../scripts/local";
-import { startHarness, type Harness } from "./harness";
+import { ADMIN_TOKEN, startHarness, type Harness } from "./harness";
 
 const usdc = (n: string) => parseUnits(n, 6);
 
@@ -433,6 +433,128 @@ describe("human approvals can't be forged or reused", () => {
     const body = await fetch(`${h.apiUrl}/v1/human/${checkpoint.id}`).then((r) => r.json());
     expect(body.status).toBe("approved");
     expect(body.idToken).toBeUndefined();
-    expect(JSON.stringify(await fetch(`${h.apiUrl}/v1/events`).then((r) => r.json()))).not.toContain("eyJ");
+    const events = await fetch(`${h.apiUrl}/v1/admin/events`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } }).then((r) => r.json());
+    expect(events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(events)).not.toContain("eyJ");
+  });
+});
+
+describe("the developer API", () => {
+  let h: Harness;
+  const admin = { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" };
+  beforeAll(async () => {
+    h = await startHarness();
+  }, 180_000);
+  afterAll(async () => {
+    await h?.stop();
+  });
+
+  const swapBody = () => JSON.stringify({ action: wethSwap(h, usdc("10")).action });
+
+  it("admin routes refuse callers without the token", async () => {
+    for (const path of ["keys", "requests", "events", "usage", "agent"]) {
+      expect((await fetch(`${h.apiUrl}/v1/admin/${path}`)).status).toBe(401);
+    }
+    const wrong = await fetch(`${h.apiUrl}/v1/admin/keys`, { headers: { authorization: "Bearer nope" } });
+    expect(wrong.status).toBe(401);
+  });
+
+  it("a key clears without paying, its secret isn't stored, and revoking stops it", async () => {
+    const created = await fetch(`${h.apiUrl}/v1/admin/keys`, { method: "POST", headers: admin, body: JSON.stringify({ name: "ci" }) }).then((r) => r.json());
+    expect(created.secret).toMatch(/^clr_/);
+    const listed = await fetch(`${h.apiUrl}/v1/admin/keys`, { headers: admin }).then((r) => r.json());
+    expect(JSON.stringify(listed)).not.toContain(created.secret);
+
+    const paid = await fetch(`${h.apiUrl}/v1/clear/swap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${created.secret}`, "content-type": "application/json" },
+      body: swapBody(),
+    });
+    expect(paid.status).toBe(200);
+    expect((await paid.json()).verdict).toBe("ALLOW");
+
+    const requests = await fetch(`${h.apiUrl}/v1/admin/requests`, { headers: admin }).then((r) => r.json());
+    expect(requests[0]).toMatchObject({ auth: "api_key", keyId: created.id, verdict: "ALLOW", status: 200 });
+
+    await fetch(`${h.apiUrl}/v1/admin/keys/${created.id}`, { method: "DELETE", headers: admin });
+    const revoked = await fetch(`${h.apiUrl}/v1/clear/swap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${created.secret}`, "content-type": "application/json" },
+      body: swapBody(),
+    });
+    expect(revoked.status).toBe(401);
+  });
+
+  it("a made-up key gets a 401, not a free check", async () => {
+    const response = await fetch(`${h.apiUrl}/v1/clear/swap`, {
+      method: "POST",
+      headers: { authorization: "Bearer clr_madeup", "content-type": "application/json" },
+      body: swapBody(),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it("no key and no payment gets a 402", async () => {
+    const response = await fetch(`${h.apiUrl}/v1/clear/swap`, { method: "POST", headers: { "content-type": "application/json" }, body: swapBody() });
+    expect(response.status).toBe(402);
+  });
+
+  it("anyone can read a proof, and it matches what the chain accepts", async () => {
+    const decision = await h.ctx.agent.clearSwap(wethSwap(h, usdc("15")).action);
+    const proof = await fetch(`${h.apiUrl}/v1/proofs/${decision.id}`).then((r) => r.json());
+    expect(proof.verdict).toBe("ALLOW");
+    expect(proof.signatures).toHaveLength(decision.evaluations.length);
+    const quorum = await h.ctx.agent.client.readContract({
+      address: h.deployment.verifierSet,
+      abi: verifierSetAbi,
+      functionName: "hasQuorum",
+      args: [proof.digest, proof.signatures],
+    });
+    expect(quorum).toBe(true);
+    expect((await fetch(`${h.apiUrl}/v1/proofs/nope`)).status).toBe(404);
+  });
+
+  it("the token check flags the rug and clears the plain token", async () => {
+    const rug = await fetch(`${h.apiUrl}/v1/tokens/${h.deployment.rug}/check`).then((r) => r.json());
+    expect(rug.verdict).toBe("RISKY");
+    expect(rug.hazards).toEqual(expect.arrayContaining(["blacklist(address)", "mint(address,uint256)"]));
+    const plain = await fetch(`${h.apiUrl}/v1/tokens/${h.deployment.weth}/check`).then((r) => r.json());
+    expect(plain.hazards).toEqual([]);
+    expect((await fetch(`${h.apiUrl}/v1/tokens/nope/check`)).status).toBe(400);
+  });
+
+  it("an attestation is refused when the owner changes limits after the clearance", async () => {
+    const { action, pool, zeroForOne } = wethSwap(h, usdc("1600"));
+    await setRecord(h, "maxSizeUsd", "2000");
+    let decision;
+    try {
+      decision = await h.ctx.agent.clearSwap(action);
+      expect(decision.attestationRequired).toBe(true);
+    } finally {
+      await setRecord(h, "maxSizeUsd", "1000");
+    }
+    const attested = await h.ctx.agent.attest(decision.id);
+    expect(attested.status).toBe("refused");
+    expect(attested.problems.join()).toMatch(/limits changed/);
+    const tx = await h.ctx.agent.swap(pool, zeroForOne, usdc("1600"), decision.hookData);
+    expect(tx).toMatchObject({ status: "reverted", reason: "NotAttested" });
+  });
+
+  it("a wallet the ENS record doesn't bind gets no signatures", async () => {
+    await setRecord(h, "account", h.deployment.treasury);
+    try {
+      const verifier = h.verifiers[0]!;
+      const evaluation = await verifier.evaluate(wethSwap(h, usdc("1")).action);
+      expect(evaluation.verdict).toBe("BLOCK");
+      expect(evaluation.reasons.map((r) => r.code)).toContain("account_not_bound");
+    } finally {
+      await setRecord(h, "account", h.deployment.account);
+    }
+  });
+
+  it("the track record counts real decisions", async () => {
+    const record = await fetch(`${h.apiUrl}/v1/track-record`).then((r) => r.json());
+    expect(record.verdicts.ALLOW).toBeGreaterThan(0);
+    expect(record.verifiers).toHaveLength(3);
   });
 });

@@ -202,6 +202,7 @@ export class Verifier {
     ]);
 
     const facts: SwapFacts = {
+      account: action.account,
       limits,
       allowedHook: getAddress(hook),
       poolHook: getAddress(action.pool.hooks),
@@ -237,6 +238,7 @@ export class Verifier {
           }
         : undefined;
     const facts = {
+      account: action.account,
       limits,
       payee: action.authorization.to,
       token: action.token,

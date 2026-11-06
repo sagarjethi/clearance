@@ -3,8 +3,10 @@ import { serve } from "@hono/node-server";
 import { createPublicClient, createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { apiApp } from "./app";
+import { CreSimulationAttestor, LocalAttestor, type Attestor } from "./attestor";
 import { HumanGate } from "./human";
 import { Store } from "./store";
+import { scanTokenFor } from "./tokens";
 import { x402Paywall } from "./x402";
 
 function required(name: string): string {
@@ -56,14 +58,34 @@ const paywall = process.env.X402_PRICE_RAW
     )
   : undefined;
 
+const client = createPublicClient({ transport: http(rpcUrl) });
+
+let attestor: Attestor | undefined;
+if (process.env.CRE_WORKFLOW_DIR) {
+  attestor = new CreSimulationAttestor({
+    workflowDir: process.env.CRE_WORKFLOW_DIR,
+    projectRoot: required("CRE_PROJECT_ROOT"),
+    client: client as never,
+    ledger: deployment.ledger,
+    creBin: process.env.CRE_BIN,
+  });
+} else if (process.env.LOCAL_ATTESTOR_KEY) {
+  const wallet = createWalletClient({ account: privateKeyToAccount(process.env.LOCAL_ATTESTOR_KEY as Hex), chain, transport: http(rpcUrl) });
+  attestor = new LocalAttestor(client as never, wallet, deployment);
+}
+
 const app = apiApp({
-  client: createPublicClient({ transport: http(rpcUrl) }),
+  client,
   deployment,
   verifierUrls: required("VERIFIER_URLS").split(","),
   store,
   human,
   paywall,
   publicUrl,
+  attestor,
+  requireAuth: !paywall,
+  adminToken: process.env.ADMIN_TOKEN,
+  scanToken: (address) => scanTokenFor(client as never, address),
   reportToken: process.env.REPORT_TOKEN,
   localOwnerWallet: process.env.LOCAL_OWNER_KEY
     ? createWalletClient({ account: privateKeyToAccount(process.env.LOCAL_OWNER_KEY as Hex), chain, transport: http(rpcUrl) })

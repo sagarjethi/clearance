@@ -56,6 +56,7 @@ PORTS.verifiers.forEach((port, i) => {
 
 const apiUrl = `http://127.0.0.1:${PORTS.api}`;
 const reportToken = "local-report-token";
+const adminToken = "local-admin-token";
 run("api", tsx, ["apps/api/src/main.ts"], {
   ...common,
   PORT: String(PORTS.api),
@@ -68,6 +69,8 @@ run("api", tsx, ["apps/api/src/main.ts"], {
   LOCAL_OWNER_KEY: testKey(ACCOUNTS.owner),
   X402_PRICE_RAW: "10000",
   X402_FACILITATOR_KEY: testKey(ACCOUNTS.facilitator),
+  LOCAL_ATTESTOR_KEY: testKey(ACCOUNTS.attestor),
+  ADMIN_TOKEN: adminToken,
 });
 
 run("runner", tsx, ["apps/agent/src/runner.ts"], {
