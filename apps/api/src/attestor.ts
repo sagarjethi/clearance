@@ -1,18 +1,15 @@
 import {
   ATTESTED,
-  RECORD_KEYS,
-  agentNode,
   encodeAttestationReport,
   evaluateAttestation,
   ledgerAbi,
   parseLimits,
+  readAgentRecords,
   quoterAbi,
-  resolverAbi,
   stateViewAbi,
   verifierSetAbi,
   type ClearanceRecord,
   type Deployment,
-  type RawRecords,
   type SwapAction,
 } from "@clearance/shared";
 import { execFile } from "node:child_process";
@@ -80,14 +77,7 @@ export class LocalAttestor implements Attestor {
     const { client, wallet, deployment } = this;
     const at = Math.floor(Date.now() / 1000);
     try {
-      const node = agentNode(request.action.agentName);
-      const entries = await Promise.all(
-        Object.entries(RECORD_KEYS).map(async ([field, key]) => [
-          field,
-          await client.readContract({ address: deployment.resolver, abi: resolverAbi, functionName: "text", args: [node, key] }),
-        ]),
-      );
-      const limits = parseLimits(Object.fromEntries(entries) as RawRecords);
+      const limits = parseLimits(await readAgentRecords(client, deployment.resolver, request.action.agentName));
       const [quorum, impactBps] = await Promise.all([
         client.readContract({
           address: deployment.verifierSet,

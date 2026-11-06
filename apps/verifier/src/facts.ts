@@ -1,16 +1,13 @@
 import {
-  RECORD_KEYS,
-  agentNode,
   parseLimits,
+  readAgentRecords,
   poolId,
   quoterAbi,
-  resolverAbi,
   scanToken,
   stateViewAbi,
   erc20Abi,
   type Limits,
   type PoolKey,
-  type RawRecords,
 } from "@clearance/shared";
 import { getAddress, type Address, type PublicClient } from "viem";
 import type { Sourced, TokenFacts } from "./rules";
@@ -29,16 +26,7 @@ async function sourced<T>(source: string, read: () => Promise<T>): Promise<Sourc
 }
 
 export function readLimits(client: PublicClient, resolver: Address, name: string): Promise<Sourced<Limits>> {
-  return sourced("ens", async () => {
-    const node = agentNode(name);
-    const entries = await Promise.all(
-      Object.entries(RECORD_KEYS).map(async ([field, key]) => {
-        const value = await client.readContract({ address: resolver, abi: resolverAbi, functionName: "text", args: [node, key] });
-        return [field, value] as const;
-      }),
-    );
-    return parseLimits(Object.fromEntries(entries) as RawRecords);
-  });
+  return sourced("ens", async () => parseLimits(await readAgentRecords(client, resolver, name)));
 }
 
 export function readToken(client: PublicClient, address: Address): Promise<Sourced<TokenFacts>> {

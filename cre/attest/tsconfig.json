@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["*.ts"]
+  "include": ["main.ts", "attest.ts"]
 }

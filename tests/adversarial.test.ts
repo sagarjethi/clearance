@@ -558,3 +558,27 @@ describe("the developer API", () => {
     expect(record.verifiers).toHaveLength(3);
   });
 });
+
+describe("owner checkpoints", () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await startHarness({ x402: false });
+  }, 180_000);
+  afterAll(async () => {
+    await h?.stop();
+  });
+
+  it("asking twice leaves one open question, and a retry opens none", async () => {
+    const { action } = wethSwap(h, usdc("2800"));
+    const first = await h.ctx.agent.clearSwap(action);
+    const second = await h.ctx.agent.clearSwap(action);
+    expect(second.checkpoint?.id).toBe(first.checkpoint?.id);
+
+    const retry = await h.ctx.agent.clearSwap(action, first.checkpoint!.id);
+    expect(retry.verdict).toBe("HUMAN_REQUIRED");
+    expect(retry.checkpoint).toBeUndefined();
+
+    const other = await h.ctx.agent.clearSwap(wethSwap(h, usdc("2900")).action);
+    expect(other.checkpoint?.id).not.toBe(first.checkpoint?.id);
+  });
+});

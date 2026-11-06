@@ -1,15 +1,16 @@
 import { LocalAttestor, apiApp, HumanGate, Store, x402Paywall, scanTokenFor } from "@clearance/api";
 import { Agent, mockOwner, type ScenarioContext } from "@clearance/agent";
 import { mockWorldApp, TEST_ACR } from "@clearance/mock-world";
-import { WORLD_ACR, loadDeployment, type Deployment } from "@clearance/shared";
+import { WORLD_ACR, loadDeployment, setupAgentName, type Deployment } from "@clearance/shared";
 import { Verifier, verifierApp, type ReviewConfig } from "@clearance/verifier";
 import { serve, type ServerType } from "@hono/node-server";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createPublicClient, createWalletClient, http } from "viem";
+import { randomBytes } from "node:crypto";
+import { createPublicClient, createTestClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { ACCOUNTS, ROOT, deployLocal, freePort, startAnvil, testAddress, testKey } from "../scripts/local";
+import { ACCOUNTS, RESOLVER_SET_LATER, ROOT, V4_SEPOLIA, agentRecords, deployLocal, freePort, startAnvil, testAddress, testKey } from "../scripts/local";
 
 export const ADMIN_TOKEN = "test-admin-token";
 
@@ -29,13 +30,44 @@ function listen(fetch: (r: Request) => Response | Promise<Response>, port: numbe
   });
 }
 
-export async function startHarness(options: { review?: ReviewConfig[]; deadVerifier?: boolean; x402?: boolean } = {}): Promise<Harness> {
+export async function startHarness(
+  options: { review?: ReviewConfig[]; deadVerifier?: boolean; x402?: boolean; forkUrl?: string } = {},
+): Promise<Harness> {
   const anvilPort = await freePort();
-  const { child: anvil, rpcUrl } = await startAnvil(anvilPort);
+  const { child: anvil, rpcUrl } = await startAnvil(anvilPort, options.forkUrl);
   const deploymentFile = resolve(ROOT, "deployments", `test-${anvilPort}.json`);
-  deployLocal(rpcUrl, deploymentFile);
+
+  if (options.forkUrl) {
+    // Anvil's default accounts carry EIP-7702 code on Sepolia, which breaks ERC-1155 mints to them.
+    const test = createTestClient({ mode: "anvil", transport: http(rpcUrl) });
+    for (const index of Object.values(ACCOUNTS)) await test.setCode({ address: testAddress(index), bytecode: "0x" });
+  }
+  deployLocal(rpcUrl, deploymentFile, options.forkUrl ? { ...V4_SEPOLIA, RESOLVER: RESOLVER_SET_LATER } : {});
   const deployment = loadDeployment(deploymentFile);
   rmSync(deploymentFile);
+
+  if (options.forkUrl) {
+    const chain = {
+      id: deployment.chainId,
+      name: "sepolia fork",
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: [rpcUrl] } },
+    };
+    const test = createTestClient({ mode: "anvil", chain, transport: http(rpcUrl) });
+    const ens = await setupAgentName({
+      client: createPublicClient({ chain, transport: http(rpcUrl) }) as never,
+      wallet: createWalletClient({ account: privateKeyToAccount(testKey(ACCOUNTS.owner)), chain, transport: http(rpcUrl) }),
+      parentLabel: `clearance-${randomBytes(5).toString("hex")}`,
+      agentLabel: "alice",
+      records: agentRecords(deployment, "local-owner"),
+      waitForCommitment: async (seconds) => {
+        await test.increaseTime({ seconds });
+        await test.mine({ blocks: 1 });
+      },
+    });
+    deployment.resolver = ens.resolver;
+    deployment.agentName = ens.name;
+  }
 
   const worldPort = await freePort();
   const issuer = `http://127.0.0.1:${worldPort}`;

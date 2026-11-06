@@ -13,7 +13,8 @@ import {
 import { decodeFunctionResult, encodeFunctionData, parseAbi, zeroAddress, type Abi, type Address, type Hex } from "viem";
 import { encodeAttestationReport, evaluateAttestation, type ClearanceRecord } from "../../packages/shared/src/attestation";
 import type { SwapAction } from "../../packages/shared/src/actions";
-import { agentNode, parseLimits, RECORD_KEYS, type RawRecords } from "../../packages/shared/src/limits";
+import { decodeTextLookup, resolveAbi, textLookupArgs } from "../../packages/shared/src/ensv2";
+import { parseLimits, RECORD_KEYS, type RawRecords } from "../../packages/shared/src/limits";
 
 export type Config = {
   schedule: string;
@@ -36,7 +37,6 @@ type Proof = {
   digest?: Hex;
 };
 
-const resolverAbi = parseAbi(["function text(bytes32 node, string key) view returns (string)"]);
 const verifierSetAbi = parseAbi(["function hasQuorum(bytes32 digest, bytes[] signatures) view returns (bool)"]);
 const stateViewAbi = parseAbi([
   "function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)",
@@ -98,11 +98,10 @@ export function attestDecision(runtime: Runtime<Config>, decisionId: string): st
   }
   const client = evmClient(config);
 
-  const node = agentNode(proof.action.agentName);
   const records = Object.fromEntries(
     Object.entries(RECORD_KEYS).map(([field, key]) => [
       field,
-      read(runtime, client, config.resolver, resolverAbi, "text", [node, key]) as string,
+      decodeTextLookup(read(runtime, client, config.resolver, resolveAbi, "resolve", textLookupArgs(proof.action.agentName, key)) as Hex),
     ]),
   ) as RawRecords;
   const limits = parseLimits(records);

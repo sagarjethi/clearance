@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { ACCOUNTS, ROOT, deployLocal, startAnvil, testAddress, testKey } from "./local";
 
-const PORTS = { anvil: 18545, world: 18791, verifiers: [18701, 18702, 18703], api: 18787, runner: 18788, web: 5173 };
+const PORTS = { anvil: 18545, world: 18791, verifiers: [18701, 18702, 18703], api: 18787, runner: 18788, web: 5183, site: 5184 };
 const children: ChildProcess[] = [];
 
 function run(name: string, command: string, args: string[], env: Record<string, string>, cwd = ROOT) {
@@ -73,6 +73,19 @@ run("api", tsx, ["apps/api/src/main.ts"], {
   ADMIN_TOKEN: adminToken,
 });
 
+async function waitFor(url: string) {
+  for (let i = 0; i < 150; i++) {
+    try {
+      if ((await fetch(url)).ok) return;
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`${url} didn't start`);
+}
+await waitFor(`${apiUrl}/health`);
+
 run("runner", tsx, ["apps/agent/src/runner.ts"], {
   ...common,
   PORT: String(PORTS.runner),
@@ -83,6 +96,7 @@ run("runner", tsx, ["apps/agent/src/runner.ts"], {
   REPORT_TOKEN: reportToken,
 });
 
-run("web", resolve(ROOT, "apps/web/node_modules/.bin/vite"), ["--port", String(PORTS.web), "--strictPort"], {}, resolve(ROOT, "apps/web"));
+run("web", resolve(ROOT, "apps/web/node_modules/.bin/vite"), ["--port", String(PORTS.web), "--strictPort"], { ADMIN_TOKEN: adminToken, API_URL: apiUrl, RUNNER_URL: `http://127.0.0.1:${PORTS.runner}` }, resolve(ROOT, "apps/web"));
+run("site", resolve(ROOT, "apps/site/node_modules/.bin/vite"), ["--port", String(PORTS.site), "--strictPort"], { VITE_API_URL: apiUrl, VITE_DASHBOARD_URL: `http://localhost:${PORTS.web}/` }, resolve(ROOT, "apps/site"));
 
-console.log(`\nClearance is starting. Dashboard: http://localhost:${PORTS.web}/\nRun every scenario from the dashboard, or with: pnpm demo\n`);
+console.log(`\nClearance is starting. Website: http://localhost:${PORTS.site}/\nDashboard: http://localhost:${PORTS.web}/\nRun every scenario from the dashboard, or with: pnpm demo\n`);
